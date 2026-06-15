@@ -2055,6 +2055,196 @@ func (s *Store) GetAnalyticsVelocity(
 	return resp, nil
 }
 
+// --- TPS ---
+
+type duckTPSMsg struct {
+	role        string
+	ts          time.Time
+	valid       bool
+	model       string
+	inputTokens int
+	outputTokns int
+}
+
+func (s *Store) tpsMessages(
+	ctx context.Context,
+	sessionIDs []string,
+	loc *time.Location,
+) (map[string][]duckTPSMsg, error) {
+	out := make(map[string][]duckTPSMsg, len(sessionIDs))
+	if len(sessionIDs) == 0 {
+		return out, nil
+	}
+	args, placeholders := stringInArgs(sessionIDs)
+	rows, err := s.duck.QueryContext(ctx, `
+		SELECT session_id, ordinal, role, timestamp, model, token_usage
+		FROM messages
+		WHERE session_id IN (`+strings.Join(placeholders, ",")+`)
+			AND role IN ('user', 'assistant')
+			AND timestamp IS NOT NULL
+		ORDER BY session_id, ordinal`,
+		args...,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("querying duckdb TPS messages: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var sid, role, model string
+		var ordinal int
+		var ts any
+		var tokenUsage any
+		if err := rows.Scan(&sid, &ordinal, &role, &ts, &model, &tokenUsage); err != nil {
+			return nil, fmt.Errorf("scanning duckdb TPS message: %w", err)
+		}
+		parsed, ok := duckLocalTime(formatDBTime(ts), loc)
+		msg := duckTPSMsg{
+			role:  role,
+			ts:    parsed,
+			valid: ok,
+			model: model,
+		}
+		tuStr := ""
+		if tokenUsage != nil {
+			tuStr, _ = tokenUsage.(string)
+		}
+		if role == "assistant" && tuStr != "" &&
+			model != "" && model != "<synthetic>" {
+			pt := db.ParseTokenUsage(tuStr)
+			msg.inputTokens = pt.Input
+			msg.outputTokns = pt.Output
+		}
+		out[sid] = append(out[sid], msg)
+	}
+	return out, rows.Err()
+}
+
+func duckComputeTPSTurns(sid string, msgs []duckTPSMsg) []db.TPSTurn {
+	var turns []db.TPSTurn
+
+	type currentTurn struct {
+		userTS     time.Time
+		valid      bool
+		assistants []duckTPSMsg
+	}
+	cur := currentTurn{}
+
+	flush := func() {
+		if !cur.valid || len(cur.assistants) == 0 {
+			cur = currentTurn{}
+			return
+		}
+		t := duckComputeOneTurn(sid, cur.userTS, cur.assistants)
+		if t != nil {
+			turns = append(turns, *t)
+		}
+		cur = currentTurn{}
+	}
+
+	for _, m := range msgs {
+		if m.role == "user" {
+			flush()
+			if m.valid {
+				cur.userTS = m.ts
+				cur.valid = true
+			}
+		} else if m.role == "assistant" && cur.valid {
+			cur.assistants = append(cur.assistants, m)
+		}
+	}
+	flush()
+
+	return turns
+}
+
+func duckComputeOneTurn(
+	sid string, userTS time.Time, assistants []duckTPSMsg,
+) *db.TPSTurn {
+	var totalTokens, inputTokens, outputTokens int64
+	lastTS := userTS
+	model := ""
+	modelFound := false
+
+	for _, a := range assistants {
+		in := int64(a.inputTokens)
+		out := int64(a.outputTokns)
+		totalTokens += in + out
+		inputTokens += in
+		outputTokens += out
+		if a.ts.After(lastTS) {
+			lastTS = a.ts
+		}
+		if !modelFound && a.model != "" {
+			model = a.model
+			modelFound = true
+		}
+	}
+
+	duration := lastTS.Sub(userTS).Seconds()
+	if duration <= 0 {
+		return nil
+	}
+	if !modelFound {
+		model = "unknown"
+	}
+
+	mult := 1000.0
+	rounded := float64(int64(duration*mult+0.5)) / mult
+
+	return &db.TPSTurn{
+		SessionID:       sid,
+		Timestamp:       userTS.Format(time.RFC3339),
+		TPS:             float64(totalTokens) / duration,
+		ITPS:            float64(inputTokens) / duration,
+		OTPS:            float64(outputTokens) / duration,
+		TotalTokens:     totalTokens,
+		InputTokens:     inputTokens,
+		OutputTokens:    outputTokens,
+		DurationSeconds: rounded,
+		Model:           model,
+	}
+}
+
+func (s *Store) GetAnalyticsTPS(
+	ctx context.Context, f db.AnalyticsFilter,
+) (db.TPSResponse, error) {
+	sessions, err := s.analyticsSessions(ctx, f)
+	if err != nil {
+		return db.TPSResponse{}, err
+	}
+	if len(sessions) == 0 {
+		return db.TPSResponse{
+			ByModel:  []db.TPSModelStat{},
+			Sessions: []db.TPSSessionSummary{},
+			Turns:    []db.TPSTurn{},
+		}, nil
+	}
+
+	sessionIDs := make([]string, 0, len(sessions))
+	for _, sess := range sessions {
+		sessionIDs = append(sessionIDs, sess.id)
+	}
+
+	sessionMsgs, err := s.tpsMessages(
+		ctx, sessionIDs, analyticsLocation(f.Timezone),
+	)
+	if err != nil {
+		return db.TPSResponse{}, err
+	}
+
+	var allTurns []db.TPSTurn
+	for _, sid := range sessionIDs {
+		msgs := sessionMsgs[sid]
+		if len(msgs) < 2 {
+			continue
+		}
+		turns := duckComputeTPSTurns(sid, msgs)
+		allTurns = append(allTurns, turns...)
+	}
+
+	return db.AggregateTPS(allTurns), nil
+}
+
 type duckVelocitySession struct {
 	agent string
 	mc    int

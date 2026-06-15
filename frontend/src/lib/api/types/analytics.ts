@@ -357,3 +357,73 @@ export interface TrendsTermsResponse {
   buckets: TrendsBucket[];
   series: TrendsSeries[];
 }
+
+export interface TPSPercentiles {
+  p50: number;
+  p75: number;
+  p90: number;
+  p95: number;
+  p_max: number;
+}
+
+export interface TPSOverview {
+  total_sessions: number;
+  total_turns: number;
+  average_tps: number;
+  average_itps: number;
+  average_otps: number;
+  tps_percentiles: TPSPercentiles;
+  itps_percentiles: TPSPercentiles;
+  otps_percentiles: TPSPercentiles;
+  total_tokens: number;
+  total_input_tokens: number;
+  total_output_tokens: number;
+}
+
+export interface TPSModelStat {
+  model: string;
+  average_tps: number;
+  average_itps: number;
+  average_otps: number;
+  turn_count: number;
+  total_tokens: number;
+  total_input_tokens: number;
+  total_output_tokens: number;
+  total_duration_seconds: number;
+  tps_percentiles: TPSPercentiles;
+  itps_percentiles: TPSPercentiles;
+  otps_percentiles: TPSPercentiles;
+}
+
+export interface TPSSessionSummary {
+  session_id: string;
+  timestamp: string;
+  turn_count: number;
+  total_tokens: number;
+  input_tokens: number;
+  output_tokens: number;
+  average_tps: number;
+  average_itps: number;
+  average_otps: number;
+  models: string[];
+}
+
+export interface TPSTurn {
+  session_id: string;
+  timestamp: string;
+  tps: number;
+  itps: number;
+  otps: number;
+  total_tokens: number;
+  input_tokens: number;
+  output_tokens: number;
+  duration_seconds: number;
+  model: string;
+}
+
+export interface TPSResponse {
+  overview: TPSOverview;
+  by_model: TPSModelStat[];
+  sessions: TPSSessionSummary[];
+  turns: TPSTurn[];
+}

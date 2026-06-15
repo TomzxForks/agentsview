@@ -11,28 +11,18 @@ import type {
   TopSessionsResponse,
   SignalsAnalyticsResponse,
   AutomatedScope,
+  TPSResponse,
 } from "../api/types.js";
 import { AnalyticsService } from "../api/generated/index";
-import {
-  callGenerated,
-  isAbortError,
-} from "../api/runtime.js";
+import { callGenerated, isAbortError } from "../api/runtime.js";
 import { sessions } from "./sessions.svelte.js";
 import { perf, type PerfEntryStatus } from "./perf.svelte.js";
 import { rollingRange, today } from "../utils/dates.js";
 
-type AnalyticsParams = Parameters<
-  typeof AnalyticsService.getApiV1AnalyticsSummary
->[0];
-type ActivityParams = Parameters<
-  typeof AnalyticsService.getApiV1AnalyticsActivity
->[0];
-type HeatmapParams = Parameters<
-  typeof AnalyticsService.getApiV1AnalyticsHeatmap
->[0];
-type TopSessionsParams = Parameters<
-  typeof AnalyticsService.getApiV1AnalyticsTopSessions
->[0];
+type AnalyticsParams = Parameters<typeof AnalyticsService.getApiV1AnalyticsSummary>[0];
+type ActivityParams = Parameters<typeof AnalyticsService.getApiV1AnalyticsActivity>[0];
+type HeatmapParams = Parameters<typeof AnalyticsService.getApiV1AnalyticsHeatmap>[0];
+type TopSessionsParams = Parameters<typeof AnalyticsService.getApiV1AnalyticsTopSessions>[0];
 export type Granularity = NonNullable<ActivityParams["granularity"]>;
 export type HeatmapMetric = NonNullable<HeatmapParams["metric"]>;
 export type TopSessionsMetric = NonNullable<TopSessionsParams["metric"]>;
@@ -45,6 +35,7 @@ type Panel =
   | "hourOfWeek"
   | "sessionShape"
   | "velocity"
+  | "tps"
   | "tools"
   | "skills"
   | "topSessions"
@@ -79,6 +70,7 @@ class AnalyticsStore {
   hourOfWeek = $state<HourOfWeekResponse | null>(null);
   sessionShape = $state<SessionShapeResponse | null>(null);
   velocity = $state<VelocityResponse | null>(null);
+  tps = $state<TPSResponse | null>(null);
   tools = $state<ToolsAnalyticsResponse | null>(null);
   skills = $state<SkillsAnalyticsResponse | null>(null);
   topSessions = $state<TopSessionsResponse | null>(null);
@@ -95,6 +87,7 @@ class AnalyticsStore {
     hourOfWeek: false,
     sessionShape: false,
     velocity: false,
+    tps: false,
     tools: false,
     skills: false,
     topSessions: false,
@@ -109,6 +102,7 @@ class AnalyticsStore {
     hourOfWeek: false,
     sessionShape: false,
     velocity: false,
+    tps: false,
     tools: false,
     skills: false,
     topSessions: false,
@@ -123,6 +117,7 @@ class AnalyticsStore {
     hourOfWeek: null,
     sessionShape: null,
     velocity: null,
+    tps: null,
     tools: null,
     skills: null,
     topSessions: null,
@@ -137,6 +132,7 @@ class AnalyticsStore {
     hourOfWeek: 0,
     sessionShape: 0,
     velocity: 0,
+    tps: 0,
     tools: 0,
     skills: 0,
     topSessions: 0,
@@ -302,6 +298,7 @@ class AnalyticsStore {
     this.fetchProjects();
     this.fetchSessionShape();
     this.fetchVelocity();
+    this.fetchTPS();
     this.fetchTools();
     this.fetchSkills();
     this.fetchTopSessions();
@@ -342,9 +339,7 @@ class AnalyticsStore {
   }
 
   toggleTerminationStatus(status: string) {
-    const set = new Set(
-      this.termination.split(",").filter((s) => s.length > 0),
-    );
+    const set = new Set(this.termination.split(",").filter((s) => s.length > 0));
     if (set.has(status)) set.delete(status);
     else set.add(status);
     const next = [...set].join(",");
@@ -364,6 +359,7 @@ class AnalyticsStore {
     this.fetchProjects();
     this.fetchSessionShape();
     this.fetchVelocity();
+    this.fetchTPS();
     this.fetchTools();
     this.fetchSkills();
     this.fetchTopSessions();
@@ -400,9 +396,7 @@ class AnalyticsStore {
     }
     p.automatedScope = this.effectiveAutomatedScope;
     if (this.recentlyActive) {
-      p.activeSince = new Date(
-        Date.now() - 24 * 60 * 60 * 1000,
-      ).toISOString();
+      p.activeSince = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
     }
     if (includeTime) {
       if (this.selectedDow !== null) p.dow = this.selectedDow;
@@ -444,9 +438,7 @@ class AnalyticsStore {
       }
       p.automatedScope = this.effectiveAutomatedScope;
       if (this.recentlyActive) {
-        p.activeSince = new Date(
-          Date.now() - 24 * 60 * 60 * 1000,
-        ).toISOString();
+        p.activeSince = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
       }
       if (includeTime) {
         if (this.selectedDow !== null) {
@@ -507,8 +499,7 @@ class AnalyticsStore {
         // existing values stay visible instead of flipping to an
         // error state. First-load failures still surface.
         if (isFirstLoad) {
-          this.errors[panel] =
-            e instanceof Error ? e.message : "Failed to load";
+          this.errors[panel] = e instanceof Error ? e.message : "Failed to load";
         } else {
           console.warn(`analytics.${panel} refetch failed:`, e);
         }
@@ -536,10 +527,7 @@ class AnalyticsStore {
     return controller.signal;
   }
 
-  private clearAbortSignal(
-    panel: Panel,
-    signal: AbortSignal,
-  ): void {
+  private clearAbortSignal(panel: Panel, signal: AbortSignal): void {
     if (this.abortControllers[panel]?.signal === signal) {
       delete this.abortControllers[panel];
     }
@@ -568,6 +556,7 @@ class AnalyticsStore {
       this.fetchHourOfWeek(),
       this.fetchSessionShape(),
       this.fetchVelocity(),
+      this.fetchTPS(),
       this.fetchTools(),
       this.fetchSkills(),
       this.fetchTopSessions(),
@@ -684,6 +673,20 @@ class AnalyticsStore {
         this.velocity = data;
       },
       () => this.velocity !== null,
+    );
+  }
+
+  async fetchTPS(): Promise<FetchResult> {
+    return await this.executeFetch(
+      "tps",
+      () =>
+        AnalyticsService.getApiV1AnalyticsTps(
+          this.filterParams(),
+        ) as unknown as Promise<TPSResponse>,
+      (data) => {
+        this.tps = data;
+      },
+      () => this.tps !== null,
     );
   }
 
@@ -818,6 +821,7 @@ class AnalyticsStore {
     this.fetchProjects();
     this.fetchSessionShape();
     this.fetchVelocity();
+    this.fetchTPS();
     this.fetchTools();
     this.fetchSkills();
     this.fetchTopSessions();
@@ -849,6 +853,7 @@ class AnalyticsStore {
     this.fetchProjects();
     this.fetchSessionShape();
     this.fetchVelocity();
+    this.fetchTPS();
     this.fetchTools();
     this.fetchSkills();
     this.fetchTopSessions();

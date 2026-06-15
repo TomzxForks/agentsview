@@ -13,6 +13,7 @@ import type { DbSignalSessionsResponse } from '../models/DbSignalSessionsRespons
 import type { DbSkillsAnalyticsResponse } from '../models/DbSkillsAnalyticsResponse';
 import type { DbToolsAnalyticsResponse } from '../models/DbToolsAnalyticsResponse';
 import type { DbTopSessionsResponse } from '../models/DbTopSessionsResponse';
+import type { DbTPSResponse } from '../models/DbTPSResponse';
 import type { DbVelocityResponse } from '../models/DbVelocityResponse';
 import type { CancelablePromise } from '../core/CancelablePromise';
 import { OpenAPI } from '../core/OpenAPI';
@@ -1396,6 +1397,130 @@ export class AnalyticsService {
         'include_automated': includeAutomated,
         'termination': termination,
         'metric': metric,
+      },
+      errors: {
+        400: `Bad Request`,
+        401: `Unauthorized`,
+        403: `Forbidden`,
+        404: `Not Found`,
+        409: `Conflict`,
+        422: `Unprocessable Entity`,
+        500: `Internal Server Error`,
+        501: `Not Implemented`,
+        502: `Bad Gateway`,
+        503: `Service Unavailable`,
+        504: `Gateway Timeout`,
+      },
+    });
+  }
+  /**
+   * Get TPS analytics
+   * @returns DbTPSResponse OK
+   * @throws ApiError
+   */
+  public static getApiV1AnalyticsTps({
+    from,
+    to,
+    timezone,
+    machine,
+    project,
+    gitBranch,
+    agent,
+    model,
+    dow,
+    hour,
+    minUserMessages,
+    activeSince,
+    automatedScope,
+    includeOneShot,
+    includeAutomated,
+    termination,
+  }: {
+    /**
+     * Range start date
+     */
+    from?: string,
+    /**
+     * Range end date
+     */
+    to?: string,
+    /**
+     * IANA timezone name
+     */
+    timezone?: string,
+    /**
+     * Filter by machine
+     */
+    machine?: string,
+    /**
+     * Filter by project
+     */
+    project?: string,
+    /**
+     * Filter by git branch; opaque (project, branch) tokens from the /branches endpoint
+     */
+    gitBranch?: string,
+    /**
+     * Filter by agent
+     */
+    agent?: string,
+    /**
+     * Comma-separated model filter
+     */
+    model?: string,
+    /**
+     * Day of week, Monday=0 through Sunday=6
+     */
+    dow?: number,
+    /**
+     * Hour of day, 0 through 23
+     */
+    hour?: number,
+    /**
+     * Minimum user message count
+     */
+    minUserMessages?: number,
+    /**
+     * Filter sessions active since this RFC3339 timestamp
+     */
+    activeSince?: string,
+    /**
+     * Automation scope
+     */
+    automatedScope?: 'human' | 'all' | 'automated',
+    /**
+     * Include one-shot sessions
+     */
+    includeOneShot?: boolean,
+    /**
+     * Include automated sessions
+     */
+    includeAutomated?: boolean,
+    /**
+     * Filter by termination reason
+     */
+    termination?: string,
+  }): CancelablePromise<DbTPSResponse> {
+    return __request(OpenAPI, {
+      method: 'GET',
+      url: '/api/v1/analytics/tps',
+      query: {
+        'from': from,
+        'to': to,
+        'timezone': timezone,
+        'machine': machine,
+        'project': project,
+        'git_branch': gitBranch,
+        'agent': agent,
+        'model': model,
+        'dow': dow,
+        'hour': hour,
+        'min_user_messages': minUserMessages,
+        'active_since': activeSince,
+        'automated_scope': automatedScope,
+        'include_one_shot': includeOneShot,
+        'include_automated': includeAutomated,
+        'termination': termination,
       },
       errors: {
         400: `Bad Request`,

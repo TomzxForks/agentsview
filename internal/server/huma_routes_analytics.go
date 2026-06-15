@@ -20,6 +20,7 @@ func (s *Server) registerAnalyticsRoutes() {
 	get(s, group, "/hour-of-week", "Get analytics by hour of week", s.humaAnalyticsHourOfWeek)
 	get(s, group, "/sessions", "Get session shape analytics", s.humaAnalyticsSessionShape)
 	get(s, group, "/velocity", "Get velocity analytics", s.humaAnalyticsVelocity)
+	get(s, group, "/tps", "Get TPS analytics", s.humaAnalyticsTPS)
 	get(s, group, "/tools", "Get tool analytics", s.humaAnalyticsTools)
 	get(s, group, "/skills", "Get skill analytics", s.humaAnalyticsSkills)
 	get(s, group, "/top-sessions", "Get top sessions", s.humaAnalyticsTopSessions)
@@ -214,6 +215,21 @@ func (s *Server) humaAnalyticsVelocity(
 		return nil, internalError("analytics error", err)
 	}
 	return &jsonOutput[db.VelocityResponse]{Body: result}, nil
+}
+
+func (s *Server) humaAnalyticsTPS(
+	ctx context.Context,
+	in *AnalyticsFilterInput,
+) (*jsonOutput[db.TPSResponse], error) {
+	f, err := analyticsFilterFromInput(*in)
+	if err != nil {
+		return nil, err
+	}
+	result, err := s.db.GetAnalyticsTPS(ctx, f)
+	if err != nil {
+		return nil, internalError("analytics tps error", err)
+	}
+	return &jsonOutput[db.TPSResponse]{Body: result}, nil
 }
 
 func (s *Server) humaAnalyticsTools(

@@ -13,6 +13,7 @@
   import HourOfWeekHeatmap from "./HourOfWeekHeatmap.svelte";
   import SessionShape from "./SessionShape.svelte";
   import VelocityMetrics from "./VelocityMetrics.svelte";
+  import TPSDashboard from "./TPSDashboard.svelte";
   import ToolUsage from "./ToolUsage.svelte";
   import TopSkills from "./TopSkills.svelte";
   import AgentComparison from "./AgentComparison.svelte";
@@ -588,6 +589,10 @@
 
       <div class="chart-panel wide">
         <VelocityMetrics />
+      </div>
+
+      <div class="chart-panel wide">
+        <TPSDashboard />
       </div>
 
       <div class="chart-panel wide">

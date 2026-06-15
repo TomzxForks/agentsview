@@ -3374,3 +3374,256 @@ func rankTopSessions(
 	}
 	return sessions
 }
+
+// --- TPS ---
+
+// tpsRawMsg holds per-message data needed for TPS turn
+// computation on the PG backend.
+type tpsRawMsg struct {
+	role        string
+	ts          time.Time
+	valid       bool
+	model       string
+	inputTokens int
+	outputTokns int
+}
+
+// queryTPSMessages fetches eligible messages (with timestamps)
+// for a chunk of session IDs, ordered by ordinal.
+func (s *Store) queryTPSMessages(
+	ctx context.Context,
+	chunk []string,
+	loc *time.Location,
+	sessionMsgs map[string][]tpsRawMsg,
+) error {
+	pb := &paramBuilder{}
+	ph := pgInPlaceholders(chunk, pb)
+	q := `SELECT session_id, ordinal, role,
+		timestamp, model, token_usage
+		FROM messages
+		WHERE session_id IN ` + ph + `
+			AND role IN ('user', 'assistant')
+			AND timestamp IS NOT NULL
+		ORDER BY session_id, ordinal`
+
+	rows, err := s.pg.QueryContext(ctx, q, pb.args...)
+	if err != nil {
+		return fmt.Errorf(
+			"querying TPS messages: %w", err,
+		)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var sid, role, model string
+		var ordinal int
+		var tsPtr *time.Time
+		var tokenUsage *string
+		if err := rows.Scan(
+			&sid, &ordinal, &role, &tsPtr,
+			&model, &tokenUsage,
+		); err != nil {
+			return fmt.Errorf(
+				"scanning TPS msg: %w", err,
+			)
+		}
+		if tsPtr == nil {
+			continue
+		}
+		msg := tpsRawMsg{
+			role:  role,
+			ts:    tsPtr.In(loc),
+			valid: true,
+			model: model,
+		}
+		if role == "assistant" && tokenUsage != nil &&
+			*tokenUsage != "" && model != "" &&
+			model != "<synthetic>" {
+			parsed := db.ParseTokenUsage(*tokenUsage)
+			msg.inputTokens = parsed.Input
+			msg.outputTokns = parsed.Output
+		}
+		sessionMsgs[sid] = append(
+			sessionMsgs[sid], msg,
+		)
+	}
+	return rows.Err()
+}
+
+// computeTPSTurns groups messages into conversation turns and
+// computes per-turn TPS data points, mirroring the SQLite
+// implementation in internal/db/tps.go.
+func computeTPSTurns(
+	sid string, msgs []tpsRawMsg,
+) []db.TPSTurn {
+	var turns []db.TPSTurn
+
+	type currentTurn struct {
+		userTS     time.Time
+		valid      bool
+		assistants []tpsRawMsg
+	}
+	cur := currentTurn{}
+
+	flush := func() {
+		if !cur.valid || len(cur.assistants) == 0 {
+			cur = currentTurn{}
+			return
+		}
+		t := computeOnePGTurn(sid, cur.userTS, cur.assistants)
+		if t != nil {
+			turns = append(turns, *t)
+		}
+		cur = currentTurn{}
+	}
+
+	for _, m := range msgs {
+		if m.role == "user" {
+			flush()
+			if m.valid {
+				cur.userTS = m.ts
+				cur.valid = true
+			}
+		} else if m.role == "assistant" && cur.valid {
+			cur.assistants = append(cur.assistants, m)
+		}
+	}
+	flush()
+
+	return turns
+}
+
+func computeOnePGTurn(
+	sid string, userTS time.Time, assistants []tpsRawMsg,
+) *db.TPSTurn {
+	var totalTokens, inputTokens, outputTokens int64
+	lastTS := userTS
+	model := ""
+	modelFound := false
+
+	for _, a := range assistants {
+		in := int64(a.inputTokens)
+		out := int64(a.outputTokns)
+		totalTokens += in + out
+		inputTokens += in
+		outputTokens += out
+		if a.ts.After(lastTS) {
+			lastTS = a.ts
+		}
+		if !modelFound && a.model != "" {
+			model = a.model
+			modelFound = true
+		}
+	}
+
+	duration := lastTS.Sub(userTS).Seconds()
+	if duration <= 0 {
+		return nil
+	}
+	if !modelFound {
+		model = "unknown"
+	}
+
+	mult := 1000.0
+	rounded := float64(int64(duration*mult+0.5)) / mult
+
+	return &db.TPSTurn{
+		SessionID:       sid,
+		Timestamp:       userTS.Format(time.RFC3339),
+		TPS:             float64(totalTokens) / duration,
+		ITPS:            float64(inputTokens) / duration,
+		OTPS:            float64(outputTokens) / duration,
+		TotalTokens:     totalTokens,
+		InputTokens:     inputTokens,
+		OutputTokens:    outputTokens,
+		DurationSeconds: rounded,
+		Model:           model,
+	}
+}
+
+// GetAnalyticsTPS computes the TPS dashboard response.
+func (s *Store) GetAnalyticsTPS(
+	ctx context.Context, f db.AnalyticsFilter,
+) (db.TPSResponse, error) {
+	loc := analyticsLocation(f)
+	pb := &paramBuilder{}
+	where := buildAnalyticsWhere(f, pgDateCol, pb)
+
+	var timeIDs map[string]bool
+	if f.HasTimeFilter() {
+		var err error
+		timeIDs, err = s.filteredSessionIDs(ctx, f)
+		if err != nil {
+			return db.TPSResponse{}, err
+		}
+	}
+
+	sessQuery := `SELECT id, ` + pgDateCol +
+		` FROM sessions WHERE ` + where
+
+	sessRows, err := s.pg.QueryContext(
+		ctx, sessQuery, pb.args...,
+	)
+	if err != nil {
+		return db.TPSResponse{}, fmt.Errorf(
+			"querying TPS sessions: %w", err,
+		)
+	}
+	var sessionIDs []string
+	for sessRows.Next() {
+		var id string
+		var ts *time.Time
+		if err := sessRows.Scan(&id, &ts); err != nil {
+			sessRows.Close()
+			return db.TPSResponse{}, fmt.Errorf(
+				"scanning TPS session: %w", err,
+			)
+		}
+		date := localDate(scanDateCol(ts), loc)
+		if !inDateRange(date, f.From, f.To) {
+			continue
+		}
+		if timeIDs != nil && !timeIDs[id] {
+			continue
+		}
+		sessionIDs = append(sessionIDs, id)
+	}
+	if err := sessRows.Err(); err != nil {
+		sessRows.Close()
+		return db.TPSResponse{}, fmt.Errorf(
+			"iterating TPS sessions: %w", err,
+		)
+	}
+	sessRows.Close()
+
+	if len(sessionIDs) == 0 {
+		return db.TPSResponse{
+			ByModel:  []db.TPSModelStat{},
+			Sessions: []db.TPSSessionSummary{},
+			Turns:    []db.TPSTurn{},
+		}, nil
+	}
+
+	sessionMsgs := make(map[string][]tpsRawMsg)
+	err = pgQueryChunked(sessionIDs,
+		func(chunk []string) error {
+			return s.queryTPSMessages(
+				ctx, chunk, loc, sessionMsgs,
+			)
+		})
+	if err != nil {
+		return db.TPSResponse{}, err
+	}
+
+	var allTurns []db.TPSTurn
+	for _, sid := range sessionIDs {
+		msgs := sessionMsgs[sid]
+		if len(msgs) < 2 {
+			continue
+		}
+		turns := computeTPSTurns(sid, msgs)
+		allTurns = append(allTurns, turns...)
+	}
+
+	return db.AggregateTPS(allTurns), nil
+}

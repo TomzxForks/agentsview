@@ -1,5 +1,6 @@
 <script lang="ts">
   import { analytics } from "../../stores/analytics.svelte.js";
+  import { router } from "../../stores/router.svelte.js";
   import type {
     TPSResponse,
     TPSTurn,
@@ -532,7 +533,10 @@
               </thead>
               <tbody>
                 {#each sortedSessions.slice(0, 50) as s}
-                  <tr>
+                  <tr
+                    class="clickable"
+                    onclick={() => router.navigateToSession(s.session_id)}
+                  >
                     <td class="col-name mono" title={s.session_id}>
                       {s.session_id.slice(0, 12)}
                     </td>
@@ -821,6 +825,10 @@
 
   .data-table tbody tr:hover {
     background: var(--bg-surface-hover);
+  }
+
+  .data-table tbody tr.clickable {
+    cursor: pointer;
   }
 
   .th-btn {

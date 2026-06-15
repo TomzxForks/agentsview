@@ -514,7 +514,7 @@ func (db *DB) queryTPSMessages(
 		var ordinal int
 		var tsStr string
 		if err := rows.Scan(
-			&sid, &ordinal, &tsStr, &model, &tokenUsage,
+			&sid, &ordinal, &role, &tsStr, &model, &tokenUsage,
 		); err != nil {
 			return fmt.Errorf("scanning TPS msg: %w", err)
 		}

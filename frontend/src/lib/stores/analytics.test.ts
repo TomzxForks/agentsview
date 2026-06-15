@@ -11,6 +11,7 @@ import type {
   HourOfWeekResponse,
   SessionShapeResponse,
   VelocityResponse,
+  TPSResponse,
   ToolsAnalyticsResponse,
   SkillsAnalyticsResponse,
   TopSessionsResponse,
@@ -31,6 +32,7 @@ vi.mock("../api/generated/index", () => ({
     getApiV1AnalyticsHourOfWeek: vi.fn(),
     getApiV1AnalyticsSessions: vi.fn(),
     getApiV1AnalyticsVelocity: vi.fn(),
+    getApiV1AnalyticsTps: vi.fn(),
     getApiV1AnalyticsTools: vi.fn(),
     getApiV1AnalyticsSkills: vi.fn(),
     getApiV1AnalyticsTopSessions: vi.fn(),
@@ -48,6 +50,7 @@ const analyticsService = AnalyticsService as unknown as {
   getApiV1AnalyticsHourOfWeek: MockFn;
   getApiV1AnalyticsSessions: MockFn;
   getApiV1AnalyticsVelocity: MockFn;
+  getApiV1AnalyticsTps: MockFn;
   getApiV1AnalyticsTools: MockFn;
   getApiV1AnalyticsSkills: MockFn;
   getApiV1AnalyticsTopSessions: MockFn;
@@ -193,6 +196,27 @@ function makeSignals(): SignalsAnalyticsResponse {
   };
 }
 
+function makeTPS(): TPSResponse {
+  return {
+    overview: {
+      total_sessions: 0,
+      total_turns: 0,
+      average_tps: 0,
+      average_itps: 0,
+      average_otps: 0,
+      tps_percentiles: { p50: 0, p75: 0, p90: 0, p95: 0, p_max: 0 },
+      itps_percentiles: { p50: 0, p75: 0, p90: 0, p95: 0, p_max: 0 },
+      otps_percentiles: { p50: 0, p75: 0, p90: 0, p95: 0, p_max: 0 },
+      total_tokens: 0,
+      total_input_tokens: 0,
+      total_output_tokens: 0,
+    },
+    by_model: [],
+    sessions: [],
+    turns: [],
+  };
+}
+
 function mockAllAPIs() {
   vi.mocked(analyticsService.getApiV1AnalyticsSummary).mockResolvedValue(makeSummary());
   vi.mocked(analyticsService.getApiV1AnalyticsActivity).mockResolvedValue(makeActivity());
@@ -201,6 +225,7 @@ function mockAllAPIs() {
   vi.mocked(analyticsService.getApiV1AnalyticsHourOfWeek).mockResolvedValue(makeHourOfWeek());
   vi.mocked(analyticsService.getApiV1AnalyticsSessions).mockResolvedValue(makeSessionShape());
   vi.mocked(analyticsService.getApiV1AnalyticsVelocity).mockResolvedValue(makeVelocity());
+  vi.mocked(analyticsService.getApiV1AnalyticsTps).mockResolvedValue(makeTPS());
   vi.mocked(analyticsService.getApiV1AnalyticsTools).mockResolvedValue(makeTools());
   vi.mocked(analyticsService.getApiV1AnalyticsSkills).mockResolvedValue(makeSkills());
   vi.mocked(analyticsService.getApiV1AnalyticsTopSessions).mockResolvedValue(makeTopSessions());
@@ -242,6 +267,7 @@ function resetStore() {
   analytics.hourOfWeek = null;
   analytics.sessionShape = null;
   analytics.velocity = null;
+  analytics.tps = null;
   analytics.tools = null;
   analytics.skills = null;
   analytics.topSessions = null;
@@ -260,6 +286,7 @@ function resetStore() {
     hourOfWeek: false,
     sessionShape: false,
     velocity: false,
+    tps: false,
     tools: false,
     skills: false,
     topSessions: false,
@@ -732,6 +759,7 @@ describe("AnalyticsStore.setProject", () => {
     { name: "activity", fn: () => analyticsService.getApiV1AnalyticsActivity },
     { name: "sessionShape", fn: () => analyticsService.getApiV1AnalyticsSessions },
     { name: "velocity", fn: () => analyticsService.getApiV1AnalyticsVelocity },
+    { name: "tps", fn: () => analyticsService.getApiV1AnalyticsTps },
     { name: "tools", fn: () => analyticsService.getApiV1AnalyticsTools },
     { name: "skills", fn: () => analyticsService.getApiV1AnalyticsSkills },
     { name: "topSessions", fn: () => analyticsService.getApiV1AnalyticsTopSessions },
@@ -773,6 +801,7 @@ describe("AnalyticsStore.setProject", () => {
     { name: "activity", fn: () => analyticsService.getApiV1AnalyticsActivity },
     { name: "sessionShape", fn: () => analyticsService.getApiV1AnalyticsSessions },
     { name: "velocity", fn: () => analyticsService.getApiV1AnalyticsVelocity },
+    { name: "tps", fn: () => analyticsService.getApiV1AnalyticsTps },
     { name: "tools", fn: () => analyticsService.getApiV1AnalyticsTools },
     { name: "skills", fn: () => analyticsService.getApiV1AnalyticsSkills },
     { name: "topSessions", fn: () => analyticsService.getApiV1AnalyticsTopSessions },
@@ -800,6 +829,7 @@ describe("AnalyticsStore machine filter", () => {
     { name: "hourOfWeek", fn: () => analyticsService.getApiV1AnalyticsHourOfWeek },
     { name: "sessionShape", fn: () => analyticsService.getApiV1AnalyticsSessions },
     { name: "velocity", fn: () => analyticsService.getApiV1AnalyticsVelocity },
+    { name: "tps", fn: () => analyticsService.getApiV1AnalyticsTps },
     { name: "tools", fn: () => analyticsService.getApiV1AnalyticsTools },
     { name: "skills", fn: () => analyticsService.getApiV1AnalyticsSkills },
     { name: "topSessions", fn: () => analyticsService.getApiV1AnalyticsTopSessions },

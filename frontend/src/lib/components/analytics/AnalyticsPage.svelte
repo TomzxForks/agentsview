@@ -14,6 +14,7 @@
   import HourOfWeekHeatmap from "./HourOfWeekHeatmap.svelte";
   import SessionShape from "./SessionShape.svelte";
   import VelocityMetrics from "./VelocityMetrics.svelte";
+  import TPSDashboard from "./TPSDashboard.svelte";
   import ToolUsage from "./ToolUsage.svelte";
   import TopSkills from "./TopSkills.svelte";
   import SkillTrend from "./SkillTrend.svelte";
@@ -694,6 +695,10 @@
 
       <Card level="default" padding="none" class="chart-panel wide">
         <VelocityMetrics />
+      </Card>
+
+      <Card level="default" padding="none" class="chart-panel wide">
+        <TPSDashboard />
       </Card>
 
       <Card level="default" padding="none" class="chart-panel wide">

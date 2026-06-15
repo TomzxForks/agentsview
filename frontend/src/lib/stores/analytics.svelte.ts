@@ -9,6 +9,7 @@ import type {
   SkillsAnalyticsResponse,
   SignalsAnalyticsResponse,
   AutomatedScope,
+  TPSResponse,
 } from "../api/types.js";
 import {
   AnalyticsService,
@@ -40,6 +41,7 @@ type Panel =
   | "hourOfWeek"
   | "sessionShape"
   | "velocity"
+  | "tps"
   | "tools"
   | "skills"
   | "topSessions"
@@ -76,6 +78,7 @@ class AnalyticsStore {
   hourOfWeek = $state<HourOfWeekResponse | null>(null);
   sessionShape = $state<SessionShapeResponse | null>(null);
   velocity = $state<VelocityResponse | null>(null);
+  tps = $state<TPSResponse | null>(null);
   tools = $state<ToolsAnalyticsResponse | null>(null);
   skills = $state<SkillsAnalyticsResponse | null>(null);
   topSessions = $state<DbTopSessionsResponse | null>(null);
@@ -93,6 +96,7 @@ class AnalyticsStore {
     hourOfWeek: false,
     sessionShape: false,
     velocity: false,
+    tps: false,
     tools: false,
     skills: false,
     topSessions: false,
@@ -107,6 +111,7 @@ class AnalyticsStore {
     hourOfWeek: false,
     sessionShape: false,
     velocity: false,
+    tps: false,
     tools: false,
     skills: false,
     topSessions: false,
@@ -121,6 +126,7 @@ class AnalyticsStore {
     hourOfWeek: null,
     sessionShape: null,
     velocity: null,
+    tps: null,
     tools: null,
     skills: null,
     topSessions: null,
@@ -135,6 +141,7 @@ class AnalyticsStore {
     hourOfWeek: 0,
     sessionShape: 0,
     velocity: 0,
+    tps: 0,
     tools: 0,
     skills: 0,
     topSessions: 0,
@@ -314,6 +321,7 @@ class AnalyticsStore {
     this.fetchProjects();
     this.fetchSessionShape();
     this.fetchVelocity();
+    this.fetchTPS();
     this.fetchTools();
     this.fetchSkills();
     this.fetchTopSessions();
@@ -374,6 +382,7 @@ class AnalyticsStore {
     this.fetchProjects();
     this.fetchSessionShape();
     this.fetchVelocity();
+    this.fetchTPS();
     this.fetchTools();
     this.fetchSkills();
     this.fetchTopSessions();
@@ -554,6 +563,7 @@ class AnalyticsStore {
       this.fetchHourOfWeek(),
       this.fetchSessionShape(),
       this.fetchVelocity(),
+      this.fetchTPS(),
       this.fetchTools(),
       this.fetchSkills(),
       this.fetchTopSessions(),
@@ -675,6 +685,20 @@ class AnalyticsStore {
         this.velocity = data;
       },
       () => this.velocity !== null,
+    );
+  }
+
+  async fetchTPS(): Promise<FetchResult> {
+    return await this.executeFetch(
+      "tps",
+      () =>
+        AnalyticsService.getApiV1AnalyticsTps(
+          this.filterParams(),
+        ) as unknown as Promise<TPSResponse>,
+      (data) => {
+        this.tps = data;
+      },
+      () => this.tps !== null,
     );
   }
 
@@ -867,6 +891,7 @@ class AnalyticsStore {
     if (hadActivityRange) this.fetchHourOfWeek(this.baseParams({ includeTime: false }));
     this.fetchSessionShape();
     this.fetchVelocity();
+    this.fetchTPS();
     this.fetchTools();
     this.fetchSkills();
     this.fetchTopSessions();
@@ -926,6 +951,7 @@ class AnalyticsStore {
     this.fetchProjects();
     this.fetchSessionShape();
     this.fetchVelocity();
+    this.fetchTPS();
     this.fetchTools();
     this.fetchSkills();
     this.fetchTopSessions();

@@ -3436,6 +3436,7 @@ type tpsRawMsg struct {
 	model       string
 	inputTokens int
 	outputTokns int
+	hasToolUse  bool
 }
 
 // queryTPSMessages fetches eligible messages (with timestamps)
@@ -3449,7 +3450,7 @@ func (s *Store) queryTPSMessages(
 	pb := &paramBuilder{}
 	ph := pgInPlaceholders(chunk, pb)
 	q := `SELECT session_id, ordinal, role,
-		timestamp, model, token_usage
+		timestamp, model, token_usage, has_tool_use
 		FROM messages
 		WHERE session_id IN ` + ph + `
 			AND role IN ('user', 'assistant')
@@ -3469,9 +3470,10 @@ func (s *Store) queryTPSMessages(
 		var ordinal int
 		var tsPtr *time.Time
 		var tokenUsage *string
+		var hasToolUse bool
 		if err := rows.Scan(
 			&sid, &ordinal, &role, &tsPtr,
-			&model, &tokenUsage,
+			&model, &tokenUsage, &hasToolUse,
 		); err != nil {
 			return fmt.Errorf(
 				"scanning TPS msg: %w", err,
@@ -3481,12 +3483,14 @@ func (s *Store) queryTPSMessages(
 			continue
 		}
 		msg := tpsRawMsg{
-			role:  role,
-			ts:    tsPtr.In(loc),
-			valid: true,
-			model: model,
+			role:       role,
+			ts:         tsPtr.In(loc),
+			valid:      true,
+			model:      model,
+			hasToolUse: hasToolUse,
 		}
-		if role == "assistant" && tokenUsage != nil &&
+		if role == "assistant" && !hasToolUse &&
+			tokenUsage != nil &&
 			*tokenUsage != "" && model != "" &&
 			model != "<synthetic>" {
 			parsed := db.ParseTokenUsage(*tokenUsage)
@@ -3552,11 +3556,15 @@ func computeOnePGTurn(
 	modelFound := false
 
 	for _, a := range assistants {
-		in := int64(a.inputTokens)
-		out := int64(a.outputTokns)
-		totalTokens += in + out
-		inputTokens += in
-		outputTokens += out
+		// Skip tool-call messages: their output_tokens are tool
+		// call parameters, not model-generated response text.
+		if !a.hasToolUse {
+			in := int64(a.inputTokens)
+			out := int64(a.outputTokns)
+			totalTokens += in + out
+			inputTokens += in
+			outputTokens += out
+		}
 		if a.ts.After(lastTS) {
 			lastTS = a.ts
 		}

@@ -297,6 +297,7 @@ type tpsRawMsg struct {
 	tokenUsage  string
 	inputTokens int
 	outputTokns int
+	hasToolUse  bool
 }
 
 // computeTPSTurns groups messages into conversation turns and
@@ -356,11 +357,16 @@ func computeOneTurn(
 	modelFound := false
 
 	for _, a := range assistants {
-		in := int64(a.inputTokens)
-		out := int64(a.outputTokns)
-		totalTokens += in + out
-		inputTokens += in
-		outputTokens += out
+		// Skip tool-call messages: their output_tokens are tool
+		// call parameters, not model-generated response text.
+		// They still participate in timestamp/model tracking.
+		if !a.hasToolUse {
+			in := int64(a.inputTokens)
+			out := int64(a.outputTokns)
+			totalTokens += in + out
+			inputTokens += in
+			outputTokens += out
+		}
 		if a.ts.After(lastTS) {
 			lastTS = a.ts
 		}
@@ -496,7 +502,7 @@ func (db *DB) queryTPSMessages(
 ) error {
 	ph, args := inPlaceholders(chunk)
 	q := `SELECT session_id, ordinal, role, timestamp,
-		model, token_usage
+		model, token_usage, has_tool_use
 		FROM messages
 		WHERE session_id IN ` + ph + `
 			AND role IN ('user', 'assistant')
@@ -511,10 +517,11 @@ func (db *DB) queryTPSMessages(
 
 	for rows.Next() {
 		var sid, role, model, tokenUsage string
-		var ordinal int
+		var ordinal, hasToolUse int
 		var tsStr string
 		if err := rows.Scan(
-			&sid, &ordinal, &role, &tsStr, &model, &tokenUsage,
+			&sid, &ordinal, &role, &tsStr, &model,
+			&tokenUsage, &hasToolUse,
 		); err != nil {
 			return fmt.Errorf("scanning TPS msg: %w", err)
 		}
@@ -528,12 +535,14 @@ func (db *DB) queryTPSMessages(
 			valid:      true,
 			model:      model,
 			tokenUsage: tokenUsage,
+			hasToolUse: hasToolUse == 1,
 		}
 		// Extract token counts from token_usage JSON for
-		// assistant messages. Only messages with non-empty
-		// token_usage AND non-empty model are eligible for
-		// TPS contribution (matching usageMessageEligibility).
-		if role == "assistant" && tokenUsage != "" &&
+		// assistant messages that are NOT tool calls. Tool-call
+		// messages are excluded from token totals because their
+		// output_tokens are tool parameters, not model response.
+		if role == "assistant" && !msg.hasToolUse &&
+			tokenUsage != "" &&
 			model != "" && model != "<synthetic>" {
 			pt := ParseTokenUsage(tokenUsage)
 			msg.inputTokens = pt.Input

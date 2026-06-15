@@ -2064,6 +2064,7 @@ type duckTPSMsg struct {
 	model       string
 	inputTokens int
 	outputTokns int
+	hasToolUse  bool
 }
 
 func (s *Store) tpsMessages(
@@ -2077,7 +2078,7 @@ func (s *Store) tpsMessages(
 	}
 	args, placeholders := stringInArgs(sessionIDs)
 	rows, err := s.duck.QueryContext(ctx, `
-		SELECT session_id, ordinal, role, timestamp, model, token_usage
+		SELECT session_id, ordinal, role, timestamp, model, token_usage, has_tool_use
 		FROM messages
 		WHERE session_id IN (`+strings.Join(placeholders, ",")+`)
 			AND role IN ('user', 'assistant')
@@ -2094,21 +2095,23 @@ func (s *Store) tpsMessages(
 		var ordinal int
 		var ts any
 		var tokenUsage any
-		if err := rows.Scan(&sid, &ordinal, &role, &ts, &model, &tokenUsage); err != nil {
+		var hasToolUse bool
+		if err := rows.Scan(&sid, &ordinal, &role, &ts, &model, &tokenUsage, &hasToolUse); err != nil {
 			return nil, fmt.Errorf("scanning duckdb TPS message: %w", err)
 		}
 		parsed, ok := duckLocalTime(formatDBTime(ts), loc)
 		msg := duckTPSMsg{
-			role:  role,
-			ts:    parsed,
-			valid: ok,
-			model: model,
+			role:       role,
+			ts:         parsed,
+			valid:      ok,
+			model:      model,
+			hasToolUse: hasToolUse,
 		}
 		tuStr := ""
 		if tokenUsage != nil {
 			tuStr, _ = tokenUsage.(string)
 		}
-		if role == "assistant" && tuStr != "" &&
+		if role == "assistant" && !hasToolUse && tuStr != "" &&
 			model != "" && model != "<synthetic>" {
 			pt := db.ParseTokenUsage(tuStr)
 			msg.inputTokens = pt.Input
@@ -2166,11 +2169,15 @@ func duckComputeOneTurn(
 	modelFound := false
 
 	for _, a := range assistants {
-		in := int64(a.inputTokens)
-		out := int64(a.outputTokns)
-		totalTokens += in + out
-		inputTokens += in
-		outputTokens += out
+		// Skip tool-call messages: their output_tokens are tool
+		// call parameters, not model-generated response text.
+		if !a.hasToolUse {
+			in := int64(a.inputTokens)
+			out := int64(a.outputTokns)
+			totalTokens += in + out
+			inputTokens += in
+			outputTokens += out
+		}
 		if a.ts.After(lastTS) {
 			lastTS = a.ts
 		}

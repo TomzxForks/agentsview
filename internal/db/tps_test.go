@@ -211,6 +211,38 @@ func TestComputeTPSTurns_NoTokenUsage(t *testing.T) {
 	assert.InDelta(t, 0.0, turns[0].TPS, 0.01)
 }
 
+func TestComputeTPSTurns_ExcludesToolUseMessages(t *testing.T) {
+	base := mustParse(t, "2025-01-01T10:00:00Z")
+	msgs := []tpsRawMsg{
+		{role: "user", ts: base, valid: true},
+		// Tool-call message: tokens should be excluded
+		{role: "assistant", ts: base.Add(3 * time.Second),
+			valid: true, model: "claude",
+			inputTokens: 5000, outputTokns: 800,
+			hasToolUse: true},
+		// Tool-call message: tokens should be excluded
+		{role: "assistant", ts: base.Add(6 * time.Second),
+			valid: true, model: "claude",
+			inputTokens: 10000, outputTokns: 500,
+			hasToolUse: true},
+		// Text response: tokens should be counted
+		{role: "assistant", ts: base.Add(10 * time.Second),
+			valid: true, model: "claude",
+			inputTokens: 100, outputTokns: 200},
+	}
+	turns := computeTPSTurns("s1", msgs)
+	require.Len(t, turns, 1)
+
+	t1 := turns[0]
+	// Only the text response's tokens counted
+	assert.Equal(t, int64(300), t1.TotalTokens)
+	assert.Equal(t, int64(100), t1.InputTokens)
+	assert.Equal(t, int64(200), t1.OutputTokens)
+	// Duration spans all messages including tool calls
+	assert.InDelta(t, 30.0, t1.TPS, 0.01)
+	assert.InDelta(t, 20.0, t1.OTPS, 0.01)
+}
+
 func TestParseTokenUsage(t *testing.T) {
 	pt := ParseTokenUsage(
 		`{"input_tokens":150,"output_tokens":75}`)

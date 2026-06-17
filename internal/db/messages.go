@@ -1175,11 +1175,10 @@ func (db *DB) MessageTokenFingerprint(sessionID string) (string, error) {
 
 // MessageContentHashFingerprint returns an exact ordered fingerprint
 // of per-message body content: ordinal, the stored content_length
-// column, and a SHA-256 over the sanitized content. The parse-diff
-// comparator uses it instead of the aggregate
-// MessageContentFingerprint (sum/max/min of content_length, kept for
-// the PG push fast-path), which cannot see equal-length body rewrites
-// or per-message length changes whose aggregates collide.
+// column, and a SHA-256 over the sanitized content. Parse-diff and PG
+// push use it alongside the aggregate MessageContentFingerprint
+// (sum/max/min of content_length), which cannot see equal-length body
+// rewrites or per-message length changes whose aggregates collide.
 func (db *DB) MessageContentHashFingerprint(sessionID string) (string, error) {
 	rows, err := db.getReader().Query(
 		`SELECT ordinal, content, content_length
@@ -1221,6 +1220,20 @@ func (db *DB) MessageContentHashFingerprint(sessionID string) (string, error) {
 // (selectMessageCols coalesces the same way); without it a single
 // imported NULL row would error here and abort the whole parse-diff run.
 func (db *DB) MessageRoleTimeFingerprint(sessionID string) (string, error) {
+	return db.MessageRoleTimeFingerprintWithTimestampNormalizer(
+		sessionID, nil,
+	)
+}
+
+// MessageRoleTimeFingerprintWithTimestampNormalizer returns the same
+// fingerprint as MessageRoleTimeFingerprint after applying normalizeTimestamp
+// to each timestamp value. It lets callers compare against stores that preserve
+// a different timestamp representation while keeping the query and field
+// ordering identical to the raw parse-diff fingerprint.
+func (db *DB) MessageRoleTimeFingerprintWithTimestampNormalizer(
+	sessionID string,
+	normalizeTimestamp func(string) string,
+) (string, error) {
 	rows, err := db.getReader().Query(
 		`SELECT ordinal, role, COALESCE(timestamp, '')
 		 FROM messages
@@ -1241,6 +1254,9 @@ func (db *DB) MessageRoleTimeFingerprint(sessionID string) (string, error) {
 			return "", err
 		}
 		role = SanitizeUTF8(role)
+		if normalizeTimestamp != nil {
+			timestamp = normalizeTimestamp(timestamp)
+		}
 		fmt.Fprintf(&b, "%d|%d:%s|%d:%s;",
 			ordinal, len(role), role, len(timestamp), timestamp)
 	}
@@ -1253,7 +1269,8 @@ func (db *DB) MessageRoleTimeFingerprint(sessionID string) (string, error) {
 // has_tool_use, and a SHA-256 over the sanitized thinking_text. The
 // parse-diff comparator uses it as a tier-1 fast path so a parser change
 // confined to these columns still triggers the tier-2 row comparison.
-// Not used by the PG push fast-path.
+// PG push uses it with a PostgreSQL-side twin to avoid skipping
+// metadata-only rewrites.
 func (db *DB) MessageFlagsFingerprint(sessionID string) (string, error) {
 	rows, err := db.getReader().Query(
 		`SELECT ordinal, is_system, has_thinking, has_tool_use,

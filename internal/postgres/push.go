@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
@@ -1118,6 +1119,54 @@ func (s *Sync) pushMessages(
 				err,
 			)
 		}
+		localContentHashFP, err := s.local.MessageContentHashFingerprint(sessionID)
+		if err != nil {
+			return 0, fmt.Errorf(
+				"computing local content hash fingerprint: %w",
+				err,
+			)
+		}
+		pgContentHashFP, err := pgMessageContentHashFingerprint(
+			ctx, tx, sessionID,
+		)
+		if err != nil {
+			return 0, fmt.Errorf(
+				"computing pg content hash fingerprint: %w",
+				err,
+			)
+		}
+		localRoleTimeFP, err := localMessageRoleTimePGFingerprint(
+			s.local, sessionID,
+		)
+		if err != nil {
+			return 0, fmt.Errorf(
+				"computing local role/time fingerprint: %w",
+				err,
+			)
+		}
+		pgRoleTimeFP, err := pgMessageRoleTimeFingerprint(
+			ctx, tx, sessionID,
+		)
+		if err != nil {
+			return 0, fmt.Errorf(
+				"computing pg role/time fingerprint: %w",
+				err,
+			)
+		}
+		localFlagsFP, err := s.local.MessageFlagsFingerprint(sessionID)
+		if err != nil {
+			return 0, fmt.Errorf(
+				"computing local message flags fingerprint: %w",
+				err,
+			)
+		}
+		pgFlagsFP, err := pgMessageFlagsFingerprint(ctx, tx, sessionID)
+		if err != nil {
+			return 0, fmt.Errorf(
+				"computing pg message flags fingerprint: %w",
+				err,
+			)
+		}
 		localSysFP, err := s.local.SystemMessageFingerprint(sessionID)
 		if err != nil {
 			return 0, fmt.Errorf(
@@ -1176,6 +1225,9 @@ func (s *Sync) pushMessages(
 		if localSum == pgContentSum &&
 			localMax == pgContentMax &&
 			localMin == pgContentMin &&
+			localContentHashFP == pgContentHashFP &&
+			localRoleTimeFP == pgRoleTimeFP &&
+			localFlagsFP == pgFlagsFP &&
 			localSysFP == pgSystemFP.String &&
 			localTCCount == pgToolCallCount &&
 			localTCSum == pgTCContentSum &&
@@ -1515,6 +1567,125 @@ func pgMessageTokenFingerprint(
 			len(srcParentUUID), srcParentUUID,
 			isSidechain, isCompactBoundary,
 		)
+	}
+	return b.String(), rows.Err()
+}
+
+func pgMessageContentHashFingerprint(
+	ctx context.Context, tx *sql.Tx, sessionID string,
+) (string, error) {
+	rows, err := tx.QueryContext(ctx,
+		`SELECT ordinal, COALESCE(content, ''), content_length
+		 FROM messages
+		 WHERE session_id = $1
+		 ORDER BY ordinal ASC`,
+		sessionID,
+	)
+	if err != nil {
+		return "", err
+	}
+	defer rows.Close()
+
+	var b strings.Builder
+	for rows.Next() {
+		var ordinal, contentLength int
+		var content string
+		if err := rows.Scan(
+			&ordinal, &content, &contentLength,
+		); err != nil {
+			return "", err
+		}
+		sum := sha256.Sum256([]byte(db.SanitizeUTF8(content)))
+		fmt.Fprintf(&b, "%d|%d|%x;", ordinal, contentLength, sum)
+	}
+	return b.String(), rows.Err()
+}
+
+func localMessageRoleTimePGFingerprint(
+	local *db.DB, sessionID string,
+) (string, error) {
+	return local.MessageRoleTimeFingerprintWithTimestampNormalizer(
+		sessionID,
+		pgPushTimestampFingerprintText,
+	)
+}
+
+func pgPushTimestampFingerprintText(value string) string {
+	t, ok := ParseSQLiteTimestamp(value)
+	if !ok {
+		return ""
+	}
+	return FormatISO8601(t.Truncate(time.Microsecond))
+}
+
+func pgMessageRoleTimeFingerprint(
+	ctx context.Context, tx *sql.Tx, sessionID string,
+) (string, error) {
+	rows, err := tx.QueryContext(ctx,
+		`SELECT ordinal, role, timestamp
+		 FROM messages
+		 WHERE session_id = $1
+		 ORDER BY ordinal ASC`,
+		sessionID,
+	)
+	if err != nil {
+		return "", err
+	}
+	defer rows.Close()
+
+	var b strings.Builder
+	for rows.Next() {
+		var ordinal int
+		var role string
+		var timestamp sql.NullTime
+		if err := rows.Scan(
+			&ordinal, &role, &timestamp,
+		); err != nil {
+			return "", err
+		}
+		role = db.SanitizeUTF8(role)
+		timestampText := ""
+		if timestamp.Valid {
+			timestampText = FormatISO8601(timestamp.Time)
+		}
+		fmt.Fprintf(&b, "%d|%d:%s|%d:%s;",
+			ordinal, len(role), role,
+			len(timestampText), timestampText,
+		)
+	}
+	return b.String(), rows.Err()
+}
+
+func pgMessageFlagsFingerprint(
+	ctx context.Context, tx *sql.Tx, sessionID string,
+) (string, error) {
+	rows, err := tx.QueryContext(ctx,
+		`SELECT ordinal, is_system, has_thinking, has_tool_use,
+			COALESCE(thinking_text, '')
+		 FROM messages
+		 WHERE session_id = $1
+		 ORDER BY ordinal ASC`,
+		sessionID,
+	)
+	if err != nil {
+		return "", err
+	}
+	defer rows.Close()
+
+	var b strings.Builder
+	for rows.Next() {
+		var ordinal int
+		var isSystem, hasThinking, hasToolUse bool
+		var thinkingText string
+		if err := rows.Scan(
+			&ordinal, &isSystem, &hasThinking, &hasToolUse,
+			&thinkingText,
+		); err != nil {
+			return "", err
+		}
+		sum := sha256.Sum256([]byte(db.SanitizeUTF8(thinkingText)))
+		fmt.Fprintf(&b, "%d|%t|%t|%t|%x;",
+			ordinal, isSystem, hasThinking, hasToolUse, sum)
 	}
 	return b.String(), rows.Err()
 }

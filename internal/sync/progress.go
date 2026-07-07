@@ -76,6 +76,16 @@ type SyncStats struct {
 	messagesIndexed        int // unexported: progress message counter
 	parserExcludedFiles    int // file-level intentional parser exclusions
 	parserExcludedIDs      []string
+	// cwdFilteredSessions counts sessions vetoed by the
+	// sync_include_cwd_prefixes allow-list. The resync abort guard uses
+	// it so a run where every discovered session is filtered reads as
+	// an intentional result rather than an unsafe empty rebuild.
+	cwdFilteredSessions int
+	// cwdFilteredFiles counts files whose every parsed session was
+	// vetoed by the allow-list. Together with parserExcludedFiles it
+	// must account for all of filesOK before the resync abort guard
+	// treats a zero-write run as intentional.
+	cwdFilteredFiles int
 }
 
 // AnomalyStats aggregates parser-output anomaly signals observed during a

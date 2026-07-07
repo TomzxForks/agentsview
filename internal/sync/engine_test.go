@@ -966,7 +966,7 @@ func TestWriteBatchRemoteIDPrefixUsageEvents(t *testing.T) {
 		}},
 	}
 
-	written, _, failed := e.writeBatch(
+	written, _, failed, _ := e.writeBatch(
 		[]pendingWrite{pw}, syncWriteDefault, false,
 	)
 	require.Equal(t, 0, failed, "no session writes may fail")
@@ -996,7 +996,7 @@ func TestProjectIdentityWriteBatchDiscoversLocalGitRemote(t *testing.T) {
 	require.NoError(t, os.Mkdir(cwd, 0o755))
 
 	e := NewEngine(database, EngineConfig{Machine: "laptop"})
-	written, _, failed := e.writeBatch([]pendingWrite{{
+	written, _, failed, _ := e.writeBatch([]pendingWrite{{
 		sess: parser.ParsedSession{
 			ID:        "identity-local",
 			Project:   "repo",
@@ -1156,7 +1156,7 @@ func TestProjectIdentityWriteBatchRejectsNonNativeWindowsDriveGitRemote(t *testi
 	require.NoError(t, os.MkdirAll(cwd, 0o755))
 
 	e := NewEngine(database, EngineConfig{Machine: "windows-host"})
-	written, _, failed := e.writeBatch([]pendingWrite{{
+	written, _, failed, _ := e.writeBatch([]pendingWrite{{
 		sess: parser.ParsedSession{
 			ID:        "identity-windows",
 			Project:   "windows",
@@ -1191,7 +1191,7 @@ func TestProjectIdentityRemoteWriteSkipsLiveDiscovery(t *testing.T) {
 			return "remote-host:" + path
 		},
 	})
-	written, _, failed := e.writeBatch([]pendingWrite{{
+	written, _, failed, _ := e.writeBatch([]pendingWrite{{
 		sess: parser.ParsedSession{
 			ID:        "identity-remote",
 			Project:   "remote-project",
@@ -1346,13 +1346,13 @@ func TestWriteBatchAntigravityReplacesMessages(t *testing.T) {
 		}
 	}
 
-	written, _, failed := e.writeBatch(
+	written, _, failed, _ := e.writeBatch(
 		[]pendingWrite{mkWrite(false)}, syncWriteDefault, false,
 	)
 	require.Equal(t, 0, failed)
 	require.Equal(t, 1, written)
 
-	written, _, failed = e.writeBatch(
+	written, _, failed, _ = e.writeBatch(
 		[]pendingWrite{mkWrite(true)}, syncWriteDefault, false,
 	)
 	require.Equal(t, 0, failed)
@@ -1402,13 +1402,13 @@ func TestWriteBatchQwenPawReplacesMessages(t *testing.T) {
 		}
 	}
 
-	written, _, failed := e.writeBatch(
+	written, _, failed, _ := e.writeBatch(
 		[]pendingWrite{mkWrite("old content")}, syncWriteDefault, false,
 	)
 	require.Equal(t, 0, failed)
 	require.Equal(t, 1, written)
 
-	written, _, failed = e.writeBatch(
+	written, _, failed, _ = e.writeBatch(
 		[]pendingWrite{mkWrite("new content")}, syncWriteDefault, false,
 	)
 	require.Equal(t, 0, failed)
@@ -1533,7 +1533,7 @@ func TestProcessAntigravityWALOnlyUpdateNotSkipped(t *testing.T) {
 		usageEvents:  res.results[0].UsageEvents,
 		forceReplace: res.forceReplace,
 	}
-	written, _, failed := e.writeBatch(
+	written, _, failed, _ := e.writeBatch(
 		[]pendingWrite{pw}, syncWriteDefault, false,
 	)
 	require.Equal(t, 0, failed)
@@ -1662,7 +1662,7 @@ func TestProcessAntigravityBrainOnlyUpdateNotSkipped(t *testing.T) {
 		usageEvents:  res.results[0].UsageEvents,
 		forceReplace: res.forceReplace,
 	}
-	written, _, failed := e.writeBatch(
+	written, _, failed, _ := e.writeBatch(
 		[]pendingWrite{pw}, syncWriteDefault, false,
 	)
 	require.Equal(t, 0, failed)
@@ -2773,10 +2773,10 @@ func TestPrepareSessionWriteReclampsMessageDerivedTokenTotals(t *testing.T) {
 	sess.PeakContextTokens = 999_999_999
 	sess.HasPeakContextTokens = true
 
-	prepared, dbMsgs, ok := e.prepareSessionWrite(
+	prepared, dbMsgs, verdict := e.prepareSessionWrite(
 		pendingWrite{sess: sess, msgs: msgs}, nil,
 	)
-	require.True(t, ok)
+	require.Equal(t, sessionWriteOK, verdict)
 	require.Len(t, dbMsgs, 3)
 
 	// The corrupt message row is clamped to the per-message bound.
@@ -2804,10 +2804,10 @@ func TestPrepareSessionWriteReclampsMessageDerivedTokenTotals(t *testing.T) {
 	summarySess.PeakContextTokens = summaryPeak
 	summarySess.HasPeakContextTokens = true
 
-	preparedSummary, _, ok := e.prepareSessionWrite(
+	preparedSummary, _, verdict := e.prepareSessionWrite(
 		pendingWrite{sess: summarySess, msgs: msgs}, nil,
 	)
-	require.True(t, ok)
+	require.Equal(t, sessionWriteOK, verdict)
 	assert.Equal(t, summaryTotal, preparedSummary.TotalOutputTokens,
 		"summary-derived total left untouched by per-message clamp")
 	assert.Equal(t, summaryPeak, preparedSummary.PeakContextTokens,
@@ -2857,10 +2857,10 @@ func TestPrepareSessionWriteReclampsEventDerivedTokenTotals(t *testing.T) {
 		HasPeakContextTokens: true,
 	}
 
-	prepared, _, ok := e.prepareSessionWrite(
+	prepared, _, verdict := e.prepareSessionWrite(
 		pendingWrite{sess: sess, msgs: msgs, usageEvents: events}, nil,
 	)
-	require.True(t, ok)
+	require.Equal(t, sessionWriteOK, verdict)
 	assert.Equal(t, 1_000_000+1_500_000+maxPlausibleTokens,
 		prepared.TotalOutputTokens,
 		"event-derived total re-derived from clamped usage events")
@@ -2904,10 +2904,10 @@ func TestPrepareSessionWritePreservesSummaryUsageEventTokenTotals(t *testing.T) 
 		HasPeakContextTokens: true,
 	}
 
-	prepared, _, ok := e.prepareSessionWrite(
+	prepared, _, verdict := e.prepareSessionWrite(
 		pendingWrite{sess: sess, msgs: msgs, usageEvents: events}, nil,
 	)
-	require.True(t, ok)
+	require.Equal(t, sessionWriteOK, verdict)
 	assert.Equal(t, rawTotal, prepared.TotalOutputTokens,
 		"session-summary usage event must not make the session aggregate event-derived")
 	assert.Equal(t, rawPeak, prepared.PeakContextTokens,
@@ -2959,10 +2959,10 @@ func TestPrepareSessionWriteReclampsEventDerivedCacheContext(t *testing.T) {
 		HasPeakContextTokens: true,
 	}
 
-	prepared, _, ok := e.prepareSessionWrite(
+	prepared, _, verdict := e.prepareSessionWrite(
 		pendingWrite{sess: sess, msgs: msgs, usageEvents: events}, nil,
 	)
-	require.True(t, ok)
+	require.Equal(t, sessionWriteOK, verdict)
 	assert.Equal(t, 100_000+100_000+maxPlausibleTokens,
 		prepared.TotalOutputTokens,
 		"event-derived total re-derived from clamped output tokens")
@@ -3017,10 +3017,10 @@ func TestPrepareSessionWriteReclampsEventDerivedMixedSignTokens(t *testing.T) {
 		HasPeakContextTokens: true,
 	}
 
-	prepared, _, ok := e.prepareSessionWrite(
+	prepared, _, verdict := e.prepareSessionWrite(
 		pendingWrite{sess: sess, msgs: msgs, usageEvents: events}, nil,
 	)
-	require.True(t, ok)
+	require.Equal(t, sessionWriteOK, verdict)
 	// Negative output floors to 0 (dropped); over-bound output clamps to 2M.
 	assert.Equal(t, 1_000_000+maxPlausibleTokens, prepared.TotalOutputTokens,
 		"negative event excluded, over-bound event clamped in event total")
@@ -4675,7 +4675,7 @@ func TestWriteIncrementalBlanksImplausibleEndedAt(t *testing.T) {
 					Timestamp: start,
 				}},
 			}
-			_, _, failed := e.writeBatch(
+			_, _, failed, _ := e.writeBatch(
 				[]pendingWrite{pw}, syncWriteDefault, false,
 			)
 			require.Equal(t, 0, failed, "initial session write must not fail")
@@ -4747,7 +4747,7 @@ func TestWriteIncrementalKeepsPlausibleEndedAt(t *testing.T) {
 			Timestamp: start,
 		}},
 	}
-	_, _, failed := e.writeBatch(
+	_, _, failed, _ := e.writeBatch(
 		[]pendingWrite{pw}, syncWriteDefault, false,
 	)
 	require.Equal(t, 0, failed, "initial session write must not fail")

@@ -60,6 +60,14 @@ type EngineConfig struct {
 	AgentDirs               map[parser.AgentType][]string
 	Machine                 string
 	BlockedResultCategories []string
+	// IncludeCwdPrefixes, when non-empty, restricts ingestion to
+	// sessions whose working directory equals one of the prefixes
+	// or lives underneath one. Sessions without a recorded cwd are
+	// skipped while the filter is active. Populated from the
+	// sync_include_cwd_prefixes config option for local sync;
+	// remote sync leaves it empty because the prefixes describe
+	// local paths.
+	IncludeCwdPrefixes []string
 	// IDPrefix is prepended to all session IDs. Used by
 	// remote sync to namespace IDs by host (e.g. "host~").
 	IDPrefix string
@@ -90,6 +98,7 @@ type Engine struct {
 	agentDirs               map[parser.AgentType][]string
 	machine                 string
 	blockedResultCategories map[string]bool
+	cwdFilter               cwdPrefixFilter
 	syncMu                  gosync.Mutex // serializes all sync operations
 	mu                      gosync.RWMutex
 	lastSync                time.Time
@@ -222,6 +231,7 @@ func NewEngine(
 		agentDirs:               dirs,
 		machine:                 cfg.Machine,
 		blockedResultCategories: blockedCategorySet(cfg.BlockedResultCategories),
+		cwdFilter:               newCwdPrefixFilter(cfg.IncludeCwdPrefixes),
 		skipCache:               skipCache,
 		skipFingerprints:        make(map[string]string),
 		s3CodexIndexCache:       make(map[string]s3CodexIndexSnapshot),
@@ -1031,6 +1041,61 @@ const resyncTempSuffix = "-resync"
 // atomically swaps the files and reopens the original DB
 // handle. This avoids the per-row trigger overhead of bulk
 // deleting hundreds of thousands of messages in place.
+// shouldAbortResyncSwap decides whether a finished resync pass built a
+// database that would be worse than the original, so the swap must be
+// abandoned:
+//   - sync was cancelled (partial rebuild)
+//   - nothing synced at all (empty discovery, or all skipped)
+//     when old DB had data
+//   - more files failed than succeeded (permission errors,
+//     disk issues)
+//
+// OpenCode-only rebuilds are allowed to finish with 0 freshly synced
+// sessions when every storage parse was intentionally preserved
+// against the archive; orphan copy restores those rows immediately
+// after the sync pass. A few permanent parse failures are tolerated
+// since those files were broken in the old DB too.
+// OpenCode-format storage is a self-preserving container store that
+// flows through file discovery, so it is excluded from the discovery
+// check just as it is subtracted from oldFileSessions by the caller.
+// Otherwise its discovery would mask the disappearance of plain
+// file-backed sessions whose directories went empty.
+func shouldAbortResyncSwap(
+	stats SyncStats, oldFileSessions, trashedCopied int,
+) bool {
+	emptyDiscovery := stats.nonContainerDiscovered == 0 &&
+		oldFileSessions > 0
+	preservedOnly := stats.Synced == 0 &&
+		stats.TotalSessions > 0 &&
+		stats.Failed == 0 &&
+		(oldFileSessions == 0 || trashedCopied > 0)
+	excludedOnly := stats.Synced == 0 &&
+		stats.TotalSessions > 0 &&
+		stats.Failed == 0 &&
+		stats.parserExcludedFiles > 0 &&
+		stats.filesOK == stats.parserExcludedFiles
+	// A zero-write run is intentional when the sync_include_cwd_prefixes
+	// allow-list vetoed sessions AND every OK file is accounted for as
+	// either fully filtered or parser-excluded: the swap proceeds and
+	// the orphan copy restores the archived rows, because the filter
+	// gates ingestion only. Requiring the full accounting keeps the
+	// guard armed for mixed runs where other files produced nothing for
+	// an unexplained reason.
+	cwdFilteredOnly := stats.Synced == 0 &&
+		stats.TotalSessions > 0 &&
+		stats.Failed == 0 &&
+		stats.cwdFilteredSessions > 0 &&
+		stats.filesOK == stats.cwdFilteredFiles+stats.parserExcludedFiles
+	return stats.Aborted ||
+		emptyDiscovery ||
+		(stats.Synced == 0 &&
+			stats.TotalSessions > 0 &&
+			!preservedOnly &&
+			!excludedOnly &&
+			!cwdFilteredOnly) ||
+		(stats.Failed > 0 && stats.Failed > stats.filesOK)
+}
+
 func (e *Engine) ResyncAll(
 	ctx context.Context, onProgress ProgressFunc,
 ) (stats SyncStats) {
@@ -1221,42 +1286,7 @@ func (e *Engine) resyncAllLocked(
 	e.openCodeArchiveStore = nil
 	e.phaseStats.Log("resync")
 
-	// Abort swap when the fresh DB would be worse than the
-	// original:
-	// - sync was cancelled (partial rebuild)
-	// - nothing synced at all (empty discovery, or all skipped)
-	//   when old DB had data
-	// - more files failed than succeeded (permission errors,
-	//   disk issues)
-	// OpenCode-only rebuilds are allowed to finish with 0
-	// freshly synced sessions when every storage parse was
-	// intentionally preserved against the archive; orphan copy
-	// restores those rows immediately after the sync pass.
-	// A few permanent parse failures are tolerated since those
-	// files were broken in the old DB too.
-	// OpenCode-format storage is a self-preserving container store that
-	// now flows through file discovery, so it is excluded here just as it
-	// is subtracted from oldFileSessions above. Otherwise its discovery
-	// would mask the disappearance of plain file-backed sessions whose
-	// directories went empty.
-	emptyDiscovery := stats.nonContainerDiscovered == 0 &&
-		oldFileSessions > 0
-	preservedOnly := stats.Synced == 0 &&
-		stats.TotalSessions > 0 &&
-		stats.Failed == 0 &&
-		(oldFileSessions == 0 || trashedCopied > 0)
-	excludedOnly := stats.Synced == 0 &&
-		stats.TotalSessions > 0 &&
-		stats.Failed == 0 &&
-		stats.parserExcludedFiles > 0 &&
-		stats.filesOK == stats.parserExcludedFiles
-	abortSwap := stats.Aborted ||
-		emptyDiscovery ||
-		(stats.Synced == 0 &&
-			stats.TotalSessions > 0 &&
-			!preservedOnly &&
-			!excludedOnly) ||
-		(stats.Failed > 0 && stats.Failed > stats.filesOK)
+	abortSwap := shouldAbortResyncSwap(stats, oldFileSessions, trashedCopied)
 	if abortSwap {
 		log.Printf(
 			"resync: aborting swap, %d synced / %d failed / %d total",
@@ -3134,13 +3164,14 @@ func (e *Engine) syncProviderDBBackedAgent(
 		tWrite := time.Now()
 		var written int
 		if writeMode == syncWriteBulk {
-			var failedWrites int
-			written, _, failedWrites = e.writeBatch(
+			var failedWrites, cwdFiltered int
+			written, _, failedWrites, cwdFiltered = e.writeBatch(
 				pending, writeMode, true,
 			)
 			for range failedWrites {
 				stats.RecordFailed()
 			}
+			stats.cwdFilteredSessions += cwdFiltered
 		} else {
 			resolveWorktreeProject := e.loadWorktreeProjectResolver()
 			for _, pw := range pending {
@@ -3293,6 +3324,16 @@ func (e *Engine) collectAndBatch(
 		excludedSessionIDs := e.applyIDPrefixToSessionIDs(
 			r.excludedSessionIDs,
 		)
+		// A source with no session inside the cwd allow-list must not
+		// delete archived rows: its exclusions and stale-row cleanup
+		// would erase sessions whose replacement writes the filter
+		// vetoes, breaking the ingestion-only contract. Dropping the
+		// IDs here also keeps them out of parserExcludedIDs, so
+		// resync's orphan copy still restores the archived rows.
+		if len(excludedSessionIDs) > 0 &&
+			!e.sourceAllowsParserExclusions(r.processResult) {
+			excludedSessionIDs = nil
+		}
 		if len(excludedSessionIDs) > 0 {
 			if _, err := e.db.DeleteParserExcludedSessions(
 				excludedSessionIDs,
@@ -3323,6 +3364,21 @@ func (e *Engine) collectAndBatch(
 		}
 		stats.filesOK++
 
+		// Drop sessions outside the cwd allow-list before batching so
+		// the sync stats can tell an intentionally filtered file apart
+		// from one whose sessions vanished for an unexplained reason.
+		// The prepareSessionWrite veto stays as the write-seam backstop.
+		// Filtered files are deliberately not skip-cached: a later
+		// allow-list change must be able to pick them up again.
+		allowed, vetoed := e.splitResultsByCwdFilter(r.results)
+		stats.cwdFilteredSessions += vetoed
+		if vetoed > 0 && len(allowed) == 0 {
+			stats.cwdFilteredFiles++
+			progress.SessionsDone++
+			e.reportProgress(onProgress, progress)
+			continue
+		}
+
 		if r.incremental != nil {
 			if err := e.writeIncremental(r.incremental); err != nil {
 				log.Printf("%v", err)
@@ -3335,7 +3391,7 @@ func (e *Engine) collectAndBatch(
 			)
 			stats.messagesIndexed = progress.MessagesIndexed
 		} else {
-			for _, pr := range r.results {
+			for _, pr := range allowed {
 				pending = append(pending, pendingWrite{
 					sess:         pr.Session,
 					msgs:         pr.Messages,
@@ -3359,12 +3415,13 @@ func (e *Engine) collectAndBatch(
 		}
 
 		if len(pending) >= batchSize {
-			writtenSessions, writtenMessages, failedWrites :=
+			writtenSessions, writtenMessages, failedWrites, cwdFiltered :=
 				e.writeBatch(pending, writeMode, false)
 			stats.RecordSynced(writtenSessions)
 			for range failedWrites {
 				stats.RecordFailed()
 			}
+			stats.cwdFilteredSessions += cwdFiltered
 			progress.MessagesIndexed += writtenMessages
 			stats.messagesIndexed = progress.MessagesIndexed
 			pending = pending[:0]
@@ -3376,12 +3433,13 @@ func (e *Engine) collectAndBatch(
 
 flush:
 	if len(pending) > 0 {
-		writtenSessions, writtenMessages, failedWrites :=
+		writtenSessions, writtenMessages, failedWrites, cwdFiltered :=
 			e.writeBatch(pending, writeMode, false)
 		stats.RecordSynced(writtenSessions)
 		for range failedWrites {
 			stats.RecordFailed()
 		}
+		stats.cwdFilteredSessions += cwdFiltered
 		progress.MessagesIndexed += writtenMessages
 		stats.messagesIndexed = progress.MessagesIndexed
 	}
@@ -4875,6 +4933,15 @@ func (e *Engine) tryIncrementalJSONL(
 		return processResult{}, false
 	}
 
+	// A session archived before the cwd allow-list was configured
+	// must not keep growing through the append path, which bypasses
+	// the prepareSessionWrite veto. Fall back to the full parse path
+	// so the same veto applies; it also re-derives the cwd from the
+	// whole file, which covers a stored cwd that predates cwd capture.
+	if !e.cwdFilter.allows(inc.Cwd) {
+		return processResult{}, false
+	}
+
 	// Existing rows from an older parser lack new metadata
 	// columns. Force a full parse so the rewrite picks them
 	// up rather than appending new rows on top of stale ones.
@@ -5677,17 +5744,20 @@ func (e *Engine) writeBatch(
 	batch []pendingWrite,
 	writeMode syncWriteMode,
 	forceReplace bool,
-) (writtenSessions, writtenMessages, failedSessions int) {
+) (writtenSessions, writtenMessages, failedSessions, cwdFiltered int) {
 	if writeMode == syncWriteBulk {
 		return e.writeBatchBulk(batch, forceReplace)
 	}
 
 	resolveWorktreeProject := e.loadWorktreeProjectResolver()
 	for _, pw := range batch {
-		s, msgs, ok := e.prepareSessionWrite(
+		s, msgs, verdict := e.prepareSessionWrite(
 			pw, resolveWorktreeProject,
 		)
-		if !ok {
+		if verdict != sessionWriteOK {
+			if verdict == sessionWriteCwdFiltered {
+				cwdFiltered++
+			}
 			continue
 		}
 
@@ -5794,13 +5864,26 @@ func (e *Engine) writeBatch(
 		writtenSessions++
 		writtenMessages += len(msgs)
 	}
-	return writtenSessions, writtenMessages, failedSessions
+	return writtenSessions, writtenMessages, failedSessions, cwdFiltered
 }
+
+// sessionWriteVerdict says whether prepareSessionWrite produced a
+// writable session and, when it did not, why. The cwd-filter veto is
+// distinguished from archive-preserve vetoes so sync stats can count
+// filtered sessions: a resync where every discovered session is
+// filtered must read as intentional, not as an empty rebuild.
+type sessionWriteVerdict int
+
+const (
+	sessionWriteOK sessionWriteVerdict = iota
+	sessionWritePreserved
+	sessionWriteCwdFiltered
+)
 
 func (e *Engine) prepareSessionWrite(
 	pw pendingWrite,
 	resolveWorktreeProject worktreeProjectResolver,
-) (db.Session, []db.Message, bool) {
+) (db.Session, []db.Message, sessionWriteVerdict) {
 	msgs := toDBMessages(pw, e.blockedResultCategories)
 	s := toDBSession(pw)
 	applySessionMessageDerivedFields(&s, msgs)
@@ -5813,16 +5896,23 @@ func (e *Engine) prepareSessionWrite(
 		}
 	}
 
+	// Veto sessions outside the configured cwd allow-list before any
+	// preserve/merge handling so a filtered session is not written by
+	// any downstream path.
+	if !e.cwdFilter.allows(s.Cwd) {
+		return db.Session{}, nil, sessionWriteCwdFiltered
+	}
+
 	if e.shouldPreserveOpenCodeFormatArchive(
 		pw.sess.Agent, pw.sess.File.Path, s.ID,
 		pw.sess.File.Mtime, derefString(s.FileHash), msgs,
 	) {
-		return db.Session{}, nil, false
+		return db.Session{}, nil, sessionWritePreserved
 	}
 	if mergedMsgs, preserve, archived := e.reconcileVisualStudioCopilotArchive(
 		pw.sess.Agent, s.ID, pw.sess.File.Size, msgs,
 	); preserve {
-		return db.Session{}, nil, false
+		return db.Session{}, nil, sessionWritePreserved
 	} else if mergedMsgs != nil {
 		parsedMsgs := msgs
 		msgs = mergedMsgs
@@ -5901,7 +5991,7 @@ func (e *Engine) prepareSessionWrite(
 		_, _, p, h := usageEventTokenTotals(pw.usageEvents, true)
 		s.PeakContextTokens, s.HasPeakContextTokens = p, h
 	}
-	return s, msgs, true
+	return s, msgs, sessionWriteOK
 }
 
 func applySessionMessageDerivedFields(s *db.Session, msgs []db.Message) {
@@ -6577,18 +6667,21 @@ type projectIdentityCacheEntry struct {
 
 func (e *Engine) writeBatchBulk(
 	batch []pendingWrite, forceReplace bool,
-) (writtenSessions, writtenMessages, failedSessions int) {
+) (writtenSessions, writtenMessages, failedSessions, cwdFiltered int) {
 	writes := make([]db.SessionBatchWrite, 0, len(batch))
 	sources := make(map[string]batchSourceFile, len(batch))
 	resolveWorktreeProject := e.loadWorktreeProjectResolver()
 
 	for _, pw := range batch {
 		tPrep := time.Now()
-		s, msgs, ok := e.prepareSessionWrite(
+		s, msgs, verdict := e.prepareSessionWrite(
 			pw, resolveWorktreeProject,
 		)
 		e.phaseStats.PrepNanos.Add(int64(time.Since(tPrep)))
-		if !ok {
+		if verdict != sessionWriteOK {
+			if verdict == sessionWriteCwdFiltered {
+				cwdFiltered++
+			}
 			continue
 		}
 		replaceMessages := shouldReplaceFullParseMessages(
@@ -6618,7 +6711,7 @@ func (e *Engine) writeBatchBulk(
 		}
 	}
 	if len(writes) == 0 {
-		return 0, 0, 0
+		return 0, 0, 0, cwdFiltered
 	}
 
 	tWrite := time.Now()
@@ -6629,7 +6722,7 @@ func (e *Engine) writeBatchBulk(
 	e.phaseStats.BatchedWrites.Add(int64(result.WrittenSessions))
 	if err != nil {
 		log.Printf("write session batch: %v", err)
-		return 0, 0, len(writes)
+		return 0, 0, len(writes), cwdFiltered
 	}
 	for _, id := range result.ExcludedIDs {
 		if source, ok := sources[id]; ok && source.path != "" {
@@ -6643,7 +6736,8 @@ func (e *Engine) writeBatchBulk(
 	}
 	return result.WrittenSessions,
 		result.WrittenMessages,
-		result.FailedSessions
+		result.FailedSessions,
+		cwdFiltered
 }
 
 func identityObservationOrZero(
@@ -6929,6 +7023,20 @@ func shouldReplaceFullParseMessages(
 func (e *Engine) writeIncremental(
 	inc *incrementalUpdate,
 ) error {
+	// The full path vetoes filtered sessions in prepareSessionWrite;
+	// this is the equivalent veto at the incremental write seam, so
+	// no producer can append to a session outside the cwd allow-list.
+	// tryIncrementalJSONL already refuses such sessions — this guard
+	// keeps the seam safe for any future producer.
+	if !e.cwdFilter.allows(inc.cwd) {
+		log.Printf(
+			"incremental %s: cwd %q outside the configured "+
+				"allow-list, skipping append",
+			inc.sessionID, inc.cwd,
+		)
+		return nil
+	}
+
 	dbMsgs := toDBMessages(
 		pendingWrite{
 			sess: parser.ParsedSession{ID: inc.sessionID},
@@ -7100,10 +7208,10 @@ func (e *Engine) writeSessionFullWithResolver(
 	pw pendingWrite,
 	resolveWorktreeProject worktreeProjectResolver,
 ) error {
-	s, msgs, ok := e.prepareSessionWrite(
+	s, msgs, verdict := e.prepareSessionWrite(
 		pw, resolveWorktreeProject,
 	)
-	if !ok {
+	if verdict != sessionWriteOK {
 		return errSessionPreserved
 	}
 	if err := e.db.UpsertSession(s); err != nil {
@@ -8285,10 +8393,12 @@ func (e *Engine) SyncSingleSessionContext(
 	// from its directory-name fallback ID to the canonical
 	// meta.json ID and returns the stale fallback ID here; without
 	// this delete a single-session resync would leave both rows in
-	// the DB and double-count messages and usage.
+	// the DB and double-count messages and usage. Like
+	// collectAndBatch, exclusions from a source with no session
+	// inside the cwd allow-list are frozen so archived rows survive.
 	if excluded := e.applyIDPrefixToSessionIDs(
 		res.excludedSessionIDs,
-	); len(excluded) > 0 {
+	); len(excluded) > 0 && e.sourceAllowsParserExclusions(res) {
 		if _, err := e.db.DeleteParserExcludedSessions(
 			excluded,
 		); err != nil {

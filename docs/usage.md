@@ -648,6 +648,11 @@ heredocs that would otherwise be truncated. Tool result content
 is stored alongside the tool call when available, giving a
 complete view of input and output.
 
+Hover or focus a tool block to reveal copy buttons for the
+structured input and, when present, the tool output.
+
+![Copy buttons on a tool block](/assets/generated/screenshots/tool-block-copy-btn.png)
+
 Codex tool calls receive special formatting: bash commands,
 write_stdin operations, and apply_patch calls display with
 structured argument previews and categorized detail labels.
@@ -695,6 +700,13 @@ fall back to plain text. To keep large sessions fast,
 highlighting is skipped for blocks over 50 KB or 800 lines,
 and the highlighter loads lazily so it costs nothing until the
 first code fence renders.
+
+Fenced code blocks labeled `mermaid` render as Mermaid diagrams
+in an interactive viewer with source-copy and expanded-view
+controls. If the Mermaid runtime cannot load, AgentsView keeps
+the escaped diagram source readable in the message. When
+in-session search is active, Mermaid fences render as source code
+so matches can be highlighted.
 
 ![Copy button on a code block](/assets/generated/screenshots/code-block-copy-btn.png)
 
@@ -756,6 +768,15 @@ Costs under a cent display as `<$0.01`, costs up to $100 with
 two decimals, and larger costs as whole dollars. The badge is
 hidden when the session has no token data or its models have
 no pricing.
+
+As of 0.37.1, sessions with per-step usage rows also show a
+**step count** next to the token summary. Click it to expand a
+per-step breakdown: each row lists the prompt or usage event,
+the model that served it, its context size (input tokens plus
+cache reads and writes), its output tokens, and a per-step cost
+estimate when the model is priced. The rows come from the same
+session usage API with `?breakdown=true` — see
+[`agentsview session usage`](/session-api/#agentsview-session-usage).
 
 For aggregate token usage and estimated cost reports across
 all sessions, see the
@@ -1137,7 +1158,7 @@ Settings are organized into sections:
 
 | Section | What You Can Configure |
 |---------|----------------------|
-| Language | Interface language (English or Simplified Chinese) |
+| Language | Interface language (English, Simplified Chinese, Traditional Chinese, or Korean) |
 | Appearance | Theme (light/dark), high-contrast mode, message layout, text size, block visibility, desktop zoom level |
 | Agent Directories | Custom paths for each agent's session files. For Devin CLI, point at the local root that contains `cli/` (for example a redacted `.../Application Support/devin` path), not copied config or OAuth files. |
 | Terminal | Default terminal emulator for session resume |

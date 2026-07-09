@@ -776,7 +776,17 @@ type openCodeToolData struct {
 
 // openCodeToolState holds the nested state of a tool call.
 type openCodeToolState struct {
-	Input json.RawMessage `json:"input"`
+	Input    json.RawMessage       `json:"input"`
+	Metadata openCodeSkillMetadata `json:"metadata"`
+}
+
+// openCodeSkillMetadata captures the metadata OpenCode records for
+// its own skill tool. The resolved skill name and directory are
+// stored directly, so attribution does not rely on path-based
+// inference the way other agents do.
+type openCodeSkillMetadata struct {
+	Name string `json:"name"`
+	Dir  string `json:"dir"`
 }
 
 func extractOpenCodeToolCall(data string) ParsedToolCall {
@@ -785,12 +795,21 @@ func extractOpenCodeToolCall(data string) ParsedToolCall {
 		return ParsedToolCall{}
 	}
 
-	var inputJSON string
+	var (
+		inputJSON string
+		skillName string
+	)
 	if len(d.State) > 0 {
 		var state openCodeToolState
 		if err := json.Unmarshal(d.State, &state); err == nil {
 			if len(state.Input) > 0 {
 				inputJSON = string(state.Input)
+			}
+			// OpenCode's skill tool records the skill name
+			// directly in its input and metadata, so the name
+			// is read from there rather than inferred.
+			if d.ToolName == "skill" {
+				skillName = openCodeSkillName(state, inputJSON)
 			}
 		}
 	}
@@ -800,7 +819,30 @@ func extractOpenCodeToolCall(data string) ParsedToolCall {
 		ToolName:  d.ToolName,
 		Category:  NormalizeToolCategory(d.ToolName),
 		InputJSON: inputJSON,
+		SkillName: skillName,
 	}
+}
+
+// openCodeSkillName resolves the skill name for an OpenCode skill
+// tool call. OpenCode stores the name directly: first in the tool
+// input's "name" field, then in the resolved skill metadata, and
+// finally derivable from the skill directory's base name.
+func openCodeSkillName(state openCodeToolState, inputJSON string) string {
+	if name := strings.TrimSpace(
+		gjson.Get(inputJSON, "name").Str,
+	); name != "" {
+		return name
+	}
+	if name := strings.TrimSpace(state.Metadata.Name); name != "" {
+		return name
+	}
+	if dir := strings.TrimSpace(state.Metadata.Dir); dir != "" {
+		if base := filepath.Base(dir); base != "." &&
+			base != string(filepath.Separator) {
+			return base
+		}
+	}
+	return ""
 }
 
 type openCodeStorageTime struct {

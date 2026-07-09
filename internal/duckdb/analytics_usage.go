@@ -1860,8 +1860,10 @@ func (s *Store) GetAnalyticsTools(
 	return db.BuildToolsAnalytics(toolRows), nil
 }
 
+// GetAnalyticsSkills returns skill usage analytics. granularity picks
+// the trend bucket size (day, week, or month); empty defaults to week.
 func (s *Store) GetAnalyticsSkills(
-	ctx context.Context, f db.AnalyticsFilter,
+	ctx context.Context, f db.AnalyticsFilter, granularity string,
 ) (db.SkillsAnalyticsResponse, error) {
 	sessions, err := s.analyticsSessionsFiltered(ctx, f, false, false)
 	if err != nil {
@@ -1874,7 +1876,7 @@ func (s *Store) GetAnalyticsSkills(
 		ids = append(ids, r.id)
 	}
 	if len(ids) == 0 {
-		return db.BuildSkillsAnalytics(nil), nil
+		return db.BuildSkillsAnalytics(nil, granularity), nil
 	}
 
 	var skillRows []db.SkillAnalyticsRow
@@ -1930,7 +1932,7 @@ func (s *Store) GetAnalyticsSkills(
 	if err != nil {
 		return db.SkillsAnalyticsResponse{}, err
 	}
-	return db.BuildSkillsAnalytics(skillRows), nil
+	return db.BuildSkillsAnalytics(skillRows, granularity), nil
 }
 
 func (s *Store) GetAnalyticsVelocity(

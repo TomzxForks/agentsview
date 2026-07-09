@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import {
   afterEach,
+  beforeEach,
   describe,
   expect,
   it,
@@ -12,8 +13,20 @@ import SkillTrend from "./SkillTrend.svelte";
 import { analytics } from "../../stores/analytics.svelte.js";
 
 describe("SkillTrend", () => {
+  beforeEach(() => {
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      },
+    );
+  });
+
   afterEach(() => {
     analytics.skills = null;
+    analytics.skillsGranularity = "week";
     // @ts-ignore
     analytics.errors = {
       ...analytics.errors,
@@ -21,6 +34,7 @@ describe("SkillTrend", () => {
     };
     document.body.innerHTML = "";
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
   function skillsResponse(
@@ -54,12 +68,11 @@ describe("SkillTrend", () => {
     return mount(SkillTrend, { target: document.body });
   }
 
-  it("renders stacked weekly columns with a legend", async () => {
+  it("renders one line per series with a legend", async () => {
     const component = mountWithData();
     await tick();
 
     expect(document.body.textContent).toContain("Skill Usage Over Time");
-    expect(document.body.textContent).toContain("Weekly Trend");
 
     const chips = document.querySelectorAll<HTMLButtonElement>(
       ".legend-chip",
@@ -71,17 +84,15 @@ describe("SkillTrend", () => {
     expect(chips[1]!.textContent).toContain("review");
     expect(chips[2]!.textContent).toContain("deploy");
 
-    const columns = document.querySelectorAll(".week-column");
-    expect(columns).toHaveLength(2);
-    expect(columns[0]!.querySelectorAll(".segment")).toHaveLength(2);
-    expect(columns[1]!.querySelectorAll(".segment")).toHaveLength(2);
+    const lines = document.querySelectorAll(".series-line");
+    expect(lines).toHaveLength(3);
     expect(document.body.textContent).toContain("01-01");
     expect(document.body.textContent).toContain("01-08");
 
     unmount(component);
   });
 
-  it("hides a series when its legend chip is toggled", async () => {
+  it("hides a series line when its legend chip is toggled", async () => {
     const component = mountWithData();
     await tick();
 
@@ -93,18 +104,11 @@ describe("SkillTrend", () => {
     await tick();
 
     expect(chips[0]!.getAttribute("aria-pressed")).toBe("false");
-    const columns = document.querySelectorAll(".week-column");
-    // "commit" segments are gone; the other series remain.
-    expect(columns[0]!.querySelectorAll(".segment")).toHaveLength(1);
-    expect(columns[1]!.querySelectorAll(".segment")).toHaveLength(1);
+    expect(document.querySelectorAll(".series-line")).toHaveLength(2);
 
     chips[0]!.click();
     await tick();
-    expect(
-      document
-        .querySelectorAll(".week-column")[0]!
-        .querySelectorAll(".segment"),
-    ).toHaveLength(2);
+    expect(document.querySelectorAll(".series-line")).toHaveLength(3);
 
     unmount(component);
   });
@@ -113,14 +117,11 @@ describe("SkillTrend", () => {
     const component = mountWithData();
     await tick();
 
-    const firstWeekSegments = () => [
-      ...document
-        .querySelectorAll(".week-column")[0]!
-        .querySelectorAll<HTMLElement>(".segment"),
-    ];
-    // "review" is the top segment of the first week (series slot 2).
-    const before = firstWeekSegments().at(-1)!.getAttribute("style");
-    expect(before).toContain("--chart-series-2");
+    const lineStyles = () =>
+      [...document.querySelectorAll<SVGPathElement>(".series-line")]
+        .map((line) => line.getAttribute("style") ?? "");
+    // "review" is series slot 2 while all three lines are visible.
+    expect(lineStyles()[1]).toContain("--chart-series-2");
 
     document
       .querySelectorAll<HTMLButtonElement>(".legend-chip")[0]!
@@ -128,8 +129,7 @@ describe("SkillTrend", () => {
     await tick();
 
     // With "commit" hidden, "review" keeps its slot-2 hue.
-    const after = firstWeekSegments().at(-1)!.getAttribute("style");
-    expect(after).toContain("--chart-series-2");
+    expect(lineStyles()[0]).toContain("--chart-series-2");
 
     unmount(component);
   });
@@ -141,6 +141,7 @@ describe("SkillTrend", () => {
     }
     analytics.skills = skillsResponse([
       { date: "2024-01-01", by_skill: bySkill },
+      { date: "2024-01-08", by_skill: bySkill },
     ]);
     const component = mount(SkillTrend, { target: document.body });
     await tick();
@@ -150,13 +151,65 @@ describe("SkillTrend", () => {
     );
     expect(chips).toHaveLength(7);
     expect(chips[6]!.textContent).toContain("Other");
-    // skill-6 (2 calls) + skill-7 (1 call) fold into Other.
-    expect(chips[6]!.textContent).toContain("3");
+    // skill-6 (2) + skill-7 (1) fold into Other in both buckets.
+    expect(chips[6]!.textContent).toContain("6");
 
-    const segments = document
-      .querySelectorAll(".week-column")[0]!
-      .querySelectorAll(".segment");
-    expect(segments).toHaveLength(7);
+    expect(document.querySelectorAll(".series-line")).toHaveLength(7);
+
+    unmount(component);
+  });
+
+  it("shows a crosshair tooltip listing every visible series", async () => {
+    const component = mountWithData();
+    await tick();
+
+    const svg = document.querySelector<SVGElement>(".chart-svg")!;
+    svg.dispatchEvent(
+      new MouseEvent("mousemove", {
+        bubbles: true,
+        clientX: 0,
+        clientY: 20,
+      }),
+    );
+    await tick();
+
+    const tooltip = document.querySelector(".tooltip")!;
+    expect(tooltip).toBeTruthy();
+    expect(tooltip.textContent).toContain("2024-01-01");
+    const rows = tooltip.querySelectorAll(".tooltip-row");
+    expect(rows).toHaveLength(3);
+    // Rows sorted by value: commit 4, review 2, deploy 0.
+    expect(rows[0]!.textContent).toContain("commit");
+    expect(rows[0]!.textContent).toContain("4");
+    expect(rows[1]!.textContent).toContain("review");
+    expect(rows[2]!.textContent).toContain("deploy");
+    expect(document.querySelectorAll(".crosshair")).toHaveLength(1);
+
+    svg.dispatchEvent(new MouseEvent("mouseleave"));
+    await tick();
+    expect(document.querySelector(".tooltip")).toBeNull();
+
+    unmount(component);
+  });
+
+  it("changes granularity through the shared picker", async () => {
+    const fetchSpy = vi
+      .spyOn(analytics, "fetchSkills")
+      .mockResolvedValue("ok");
+    const component = mountWithData();
+    await tick();
+
+    const monthBtn = [
+      ...document.querySelectorAll<HTMLButtonElement>(
+        ".trend-header button",
+      ),
+    ].find((b) => b.textContent?.trim() === "Month");
+    expect(monthBtn).toBeTruthy();
+    monthBtn!.click();
+    await tick();
+
+    expect(analytics.skillsGranularity).toBe("month");
+    expect(fetchSpy).toHaveBeenCalledOnce();
 
     unmount(component);
   });

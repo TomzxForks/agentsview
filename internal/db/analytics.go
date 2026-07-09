@@ -2862,9 +2862,24 @@ func timestampAfter(a, b string) bool {
 	return a > b
 }
 
+// skillsTrendGranularity normalizes a skills trend granularity value.
+// Empty defaults to week, the endpoint's historical bucket size.
+func skillsTrendGranularity(granularity string) string {
+	switch granularity {
+	case "day", "week", "month":
+		return granularity
+	default:
+		return "week"
+	}
+}
+
 // BuildSkillsAnalytics folds backend-neutral skill rows into the public
 // response shape. Skill names are trimmed and empty names are ignored.
-func BuildSkillsAnalytics(rows []SkillAnalyticsRow) SkillsAnalyticsResponse {
+// granularity picks the trend bucket size (day, week, or month); empty
+// or unknown values fall back to week.
+func BuildSkillsAnalytics(
+	rows []SkillAnalyticsRow, granularity string,
+) SkillsAnalyticsResponse {
 	resp := SkillsAnalyticsResponse{
 		BySkill: []SkillUsage{},
 		Trend:   []SkillTrendEntry{},
@@ -2873,6 +2888,7 @@ func BuildSkillsAnalytics(rows []SkillAnalyticsRow) SkillsAnalyticsResponse {
 		return resp
 	}
 
+	bucket := skillsTrendGranularity(granularity)
 	bySkill := map[string]*skillUsageAccumulator{}
 	trendBuckets := map[string]map[string]int{}
 
@@ -2905,11 +2921,11 @@ func BuildSkillsAnalytics(rows []SkillAnalyticsRow) SkillsAnalyticsResponse {
 			acc.lastUsedAt = row.LastUsedAt
 		}
 		if row.Date != "" {
-			week := bucketDate(row.Date, "week")
-			if trendBuckets[week] == nil {
-				trendBuckets[week] = map[string]int{}
+			date := bucketDate(row.Date, bucket)
+			if trendBuckets[date] == nil {
+				trendBuckets[date] = map[string]int{}
 			}
-			trendBuckets[week][name] += row.Count
+			trendBuckets[date][name] += row.Count
 		}
 	}
 
@@ -2936,9 +2952,9 @@ func BuildSkillsAnalytics(rows []SkillAnalyticsRow) SkillsAnalyticsResponse {
 		return resp.BySkill[i].SkillName < resp.BySkill[j].SkillName
 	})
 
-	for week, skills := range trendBuckets {
+	for date, skills := range trendBuckets {
 		resp.Trend = append(resp.Trend, SkillTrendEntry{
-			Date: week, BySkill: skills,
+			Date: date, BySkill: skills,
 		})
 	}
 	sort.Slice(resp.Trend, func(i, j int) bool {
@@ -3182,9 +3198,10 @@ func (f AnalyticsFilter) ResolveSkillRowTime(
 }
 
 // GetAnalyticsSkills returns skill usage analytics aggregated
-// from non-empty tool_calls.skill_name values.
+// from non-empty tool_calls.skill_name values. granularity picks the
+// trend bucket size (day, week, or month); empty defaults to week.
 func (db *DB) GetAnalyticsSkills(
-	ctx context.Context, f AnalyticsFilter,
+	ctx context.Context, f AnalyticsFilter, granularity string,
 ) (SkillsAnalyticsResponse, error) {
 	dateCol := "COALESCE(NULLIF(started_at, ''), created_at)"
 	where, args := f.buildWhereWithoutDate()
@@ -3227,7 +3244,7 @@ func (db *DB) GetAnalyticsSkills(
 			fmt.Errorf("iterating skill sessions: %w", err)
 	}
 	if len(sessionIDs) == 0 {
-		return BuildSkillsAnalytics(nil), nil
+		return BuildSkillsAnalytics(nil, granularity), nil
 	}
 
 	var skillRows []SkillAnalyticsRow
@@ -3281,7 +3298,7 @@ func (db *DB) GetAnalyticsSkills(
 		return SkillsAnalyticsResponse{}, err
 	}
 
-	return BuildSkillsAnalytics(skillRows), nil
+	return BuildSkillsAnalytics(skillRows, granularity), nil
 }
 
 // --- Velocity ---

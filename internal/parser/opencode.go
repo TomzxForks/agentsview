@@ -1754,6 +1754,8 @@ func inferOpenCodeSkillName(toolName, inputJSON, cwd string) string {
 
 // openCodeSkillName resolves the skill name for an OpenCode skill
 // tool call. OpenCode stores the name directly: first in the tool
+// openCodeSkillName resolves the skill name for an OpenCode skill
+// tool call. OpenCode stores the name directly: first in the tool
 // input's "skill" then "name" field, then in the resolved skill
 // metadata, and finally derivable from the skill directory's base
 // name. Both state and input are read with gjson so a non-object

@@ -1659,7 +1659,10 @@ type openCodeToolData struct {
 	State    jsontext.Value `json:"state"`
 }
 
-// openCodeToolState holds the nested state of a tool call.
+// openCodeToolState holds the nested state of a tool call. Metadata
+// is kept as raw JSON so the bash exit-code check and any other
+// tool-specific metadata can be decoded on demand without one
+// tool's metadata shape blocking another's input extraction.
 type openCodeToolState struct {
 	Input    jsontext.Value `json:"input"`
 	Metadata jsontext.Value `json:"metadata"`
@@ -1702,10 +1705,7 @@ func extractOpenCodeToolCall(data, cwd string) ParsedToolCall {
 	var skillName string
 	switch d.ToolName {
 	case "skill":
-		skillName = gjson.Get(inputJSON, "skill").Str
-		if skillName == "" {
-			skillName = gjson.Get(inputJSON, "name").Str
-		}
+		skillName = openCodeSkillName(string(d.State), inputJSON)
 	default:
 		skillName = inferOpenCodeSkillName(d.ToolName, inputJSON, cwd)
 	}
@@ -1750,6 +1750,39 @@ func inferOpenCodeSkillName(toolName, inputJSON, cwd string) string {
 		return inferSkillNameFromJSONPaths(context.Background(), inputJSON)
 	}
 	return inferCodexSkillNameWithBase(context.Background(), toolName, inputJSON, cwd)
+}
+
+// openCodeSkillName resolves the skill name for an OpenCode skill
+// tool call. OpenCode stores the name directly: first in the tool
+// input's "skill" then "name" field, then in the resolved skill
+// metadata, and finally derivable from the skill directory's base
+// name. Both state and input are read with gjson so a non-object
+// or mistyped metadata shape degrades to "" rather than failing.
+func openCodeSkillName(state, inputJSON string) string {
+	if name := strings.TrimSpace(
+		gjson.Get(inputJSON, "skill").Str,
+	); name != "" {
+		return name
+	}
+	if name := strings.TrimSpace(
+		gjson.Get(inputJSON, "name").Str,
+	); name != "" {
+		return name
+	}
+	if name := strings.TrimSpace(
+		gjson.Get(state, "metadata.name").Str,
+	); name != "" {
+		return name
+	}
+	if dir := strings.TrimSpace(
+		gjson.Get(state, "metadata.dir").Str,
+	); dir != "" {
+		if base := filepath.Base(dir); base != "." &&
+			base != string(filepath.Separator) {
+			return base
+		}
+	}
+	return ""
 }
 
 type openCodeStorageTime struct {

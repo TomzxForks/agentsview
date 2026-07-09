@@ -1460,35 +1460,45 @@ func TestParseOpenCodeDB_ToolParts(t *testing.T) {
 	}})
 }
 
-// TestParseOpenCodeDB_SkillTool verifies that a "skill" tool part
-// populates ParsedToolCall.SkillName straight from the tool's own
-// input, without going through the read-file/shell-command
-// inference heuristics. Before this fix extractOpenCodeToolCall
-// never set SkillName at all (#1040).
+// TestParseOpenCodeDB_SkillTool verifies that OpenCode's own skill
+// tool call is attributed its skill name so it counts toward Top
+// Skills. OpenCode stores the name directly in the tool part's
+// state (no path inference), matching what a real session DB holds.
 func TestParseOpenCodeDB_SkillTool(t *testing.T) {
 	dbPath, seeder, db := newTestDB(t)
 	defer db.Close()
 
-	seeder.AddProject("prj_1", "/tmp/proj")
-	seeder.AddSession("ses_skill", "prj_1", "", "", 1700000000000, 1700000030000)
+	seeder.AddProject("prj_1", "/home/user/code/myapp")
+	seeder.AddSession("ses_skill", "prj_1", "", "", 1700000000000, 1700000010000)
 
 	seeder.AddMessage("msg_u", "ses_skill", 1700000000000, 1700000000000, `{"role":"user"}`)
-	seeder.AddPart("prt_u", "msg_u", "ses_skill", 1700000000000, 1700000000000, `{"type":"text","text":"use the doc-writer skill"}`)
+	seeder.AddPart("prt_u", "msg_u", "ses_skill", 1700000000000, 1700000000000, `{"type":"text","text":"run my skill"}`)
 
 	seeder.AddMessage("msg_a", "ses_skill", 1700000010000, 1700000010000, `{"role":"assistant"}`)
-	seeder.AddPart("prt_t", "msg_a", "ses_skill", 1700000010000, 1700000010000,
-		`{"type":"tool","tool":"skill","callID":"call_skill","state":{"input":{"name":"doc-writer"}}}`)
+	seeder.AddPart(
+		"prt_s", "msg_a", "ses_skill", 1700000010000, 1700000010000,
+		`{"type":"tool","tool":"skill","callID":"call_skill_1","state":{"status":"completed","input":{"name":"theme-system"},"metadata":{"name":"theme-system","dir":"/home/user/code/myapp/.opencode/skills/theme-system","truncated":false}}}`,
+	)
+	seeder.AddPart(
+		"prt_txt", "msg_a", "ses_skill", 1700000010000, 1700000010000,
+		`{"type":"text","text":"Loaded skill: theme-system"}`,
+	)
 
 	sessions, err := parseOpenCodeAll(dbPath, "m")
 	require.NoError(t, err, "ParseOpenCodeDB")
-	require.Len(t, sessions, 1, "sessions len")
+	require.Len(t, sessions, 1, "sessions")
 
 	msgs := sessions[0].Messages
-	require.Len(t, msgs, 2, "messages len")
+	require.Len(t, msgs, 2, "messages")
+	assertEq(t, "assistant HasToolUse", msgs[1].HasToolUse, true)
 
-	ast := msgs[1]
-	require.Len(t, ast.ToolCalls, 1, "tool calls len")
-	assertEq(t, "SkillName", ast.ToolCalls[0].SkillName, "doc-writer")
+	assertToolCalls(t, msgs[1].ToolCalls, []ParsedToolCall{{
+		ToolName:  "skill",
+		Category:  "Tool",
+		ToolUseID: "call_skill_1",
+		InputJSON: `{"name":"theme-system"}`,
+		SkillName: "theme-system",
+	}})
 }
 
 // TestParseOpenCodeDB_InvalidToolCall verifies that an invalid
@@ -1600,6 +1610,54 @@ func TestParseOpenCodeDB_BashExitFailure(t *testing.T) {
 			}
 			require.Len(t, ast.ToolCalls[0].ResultEvents, 1, "result events len")
 			assertEq(t, "ResultEvents[0].Status", ast.ToolCalls[0].ResultEvents[0].Status, "errored")
+		})
+	}
+}
+
+// TestExtractOpenCodeToolCall_SkillNameResolution covers the
+// fallback chain for resolving a skill name from an OpenCode skill
+// tool call: input.skill/name, then metadata.name, then the
+// metadata.dir base name. Non-skill tool calls go through the
+// inference path.
+func TestExtractOpenCodeToolCall_SkillNameResolution(t *testing.T) {
+	tests := []struct {
+		name      string
+		data      string
+		wantSkill string
+		wantInput string
+	}{
+		{
+			name:      "input_name",
+			data:      `{"type":"tool","tool":"skill","callID":"c1","state":{"input":{"name":"paperclip"},"metadata":{"name":"paperclip","dir":"/home/me/.claude/skills/paperclip"}}}`,
+			wantSkill: "paperclip",
+			wantInput: `{"name":"paperclip"}`,
+		},
+		{
+			name:      "metadata_name_fallback",
+			data:      `{"type":"tool","tool":"skill","callID":"c2","state":{"input":{},"metadata":{"name":"create-pr","dir":"/home/me/.claude/skills/create-pr"}}}`,
+			wantSkill: "create-pr",
+			wantInput: `{}`,
+		},
+		{
+			name:      "metadata_dir_basename_fallback",
+			data:      `{"type":"tool","tool":"skill","callID":"c3","state":{"metadata":{"dir":"/home/me/.claude/skills/fix-issue"}}}`,
+			wantSkill: "fix-issue",
+		},
+		{
+			name:      "empty_when_no_skill_signal",
+			data:      `{"type":"tool","tool":"skill","callID":"c4","state":{"input":{}}}`,
+			wantSkill: "",
+			wantInput: `{}`,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := extractOpenCodeToolCall(tc.data, "")
+			assertEq(t, "SkillName", got.SkillName, tc.wantSkill)
+			if tc.wantInput != "" {
+				assertEq(t, "InputJSON", got.InputJSON, tc.wantInput)
+			}
 		})
 	}
 }

@@ -69,7 +69,7 @@ describe("TopSkills", () => {
     return mount(TopSkills, { target: document.body });
   }
 
-  it("renders skill usage, breakdowns, and trend", async () => {
+  it("renders skill usage and breakdowns", async () => {
     const component = mountWithData();
     await tick();
 
@@ -90,7 +90,8 @@ describe("TopSkills", () => {
     expect(document.body.textContent).toContain("2");
     expect(document.body.textContent).toContain("29%");
     expect(document.body.textContent).toContain("Projects: agentsview: 4, notes: 3");
-    expect(document.body.textContent).toContain("Weekly Trend");
+    // The trend moved to the dedicated SkillTrend panel.
+    expect(document.body.textContent).not.toContain("Weekly Trend");
 
     unmount(component);
   });

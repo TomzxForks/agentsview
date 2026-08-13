@@ -184,8 +184,8 @@ describe("SkillTrend", () => {
 
   it("folds skills past the series cap into Other", async () => {
     const bySkill: Record<string, number> = {};
-    for (let i = 0; i < 8; i++) {
-      bySkill[`skill-${i}`] = 8 - i;
+    for (let i = 0; i < 22; i++) {
+      bySkill[`skill-${i}`] = 22 - i;
     }
     analytics.skills = skillsResponse([
       { date: "2024-01-01", by_skill: bySkill },
@@ -195,17 +195,17 @@ describe("SkillTrend", () => {
     await tick();
 
     const chips = document.querySelectorAll<HTMLButtonElement>(".legend-chip");
-    expect(chips).toHaveLength(7);
-    expect(chips[6]!.textContent).toContain("Other");
-    // skill-6 (2) + skill-7 (1) fold into Other in both buckets.
-    expect(chips[6]!.textContent).toContain("6");
-    expect(chips[6]!.querySelector<HTMLElement>(".legend-key")?.style.background).toBe(
+    expect(chips).toHaveLength(21);
+    expect(chips[20]!.textContent).toContain("Other");
+    // skill-20 (2) + skill-21 (1) fold into Other in both buckets.
+    expect(chips[20]!.textContent).toContain("6");
+    expect(chips[20]!.querySelector<HTMLElement>(".legend-key")?.style.background).toBe(
       "var(--chart-series-other)",
     );
 
     const lines = document.querySelectorAll<SVGPathElement>(".series-line");
-    expect(lines).toHaveLength(7);
-    expect(lines[6]!.style.stroke).toBe("var(--chart-series-other)");
+    expect(lines).toHaveLength(21);
+    expect(lines[20]!.style.stroke).toBe("var(--chart-series-other)");
 
     await unmount(component);
   });

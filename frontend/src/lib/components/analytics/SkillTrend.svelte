@@ -9,9 +9,9 @@
   import { chartSeriesColorMap } from "../../utils/chartPalette.js";
   import LargeChartFrame from "../shared/LargeChartFrame.svelte";
 
-  // Soft cap from the series-count ladder: past six skills the tail folds
-  // into "Other" instead of generating more hues.
-  const MAX_SERIES = 6;
+  // Soft cap from the series-count ladder: past the top skills the tail
+  // folds into "Other" instead of generating more hues.
+  const MAX_SERIES = 20;
   const OTHER_KEY = "__other__";
   const PLOT_HEIGHT = 120;
   const PLOT_TOP = 8;

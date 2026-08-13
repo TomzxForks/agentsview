@@ -81,14 +81,30 @@
   --cat-mixed: #4a4a4a; /* Mixed: parallel-group rail, no-dominant */ /* kit-ui-check-ignore: app token definition */
   /* Categorical chart series (skill trend and similar stacked charts).
      Fixed slot order, validated as a set for CVD separation and contrast
-     against the light surface. "other" is the deliberate de-emphasis gray
-     for the folded tail, not a series hue. */
+     against the light surface. Slots 1-6 are the primary set; slots 7-20
+     extend it with Paul Tol colorblind-safe hues so the skill trend can
+     plot up to twenty series before folding the tail. "other" is the
+     deliberate de-emphasis gray for the folded tail, not a series hue. */
   --chart-series-1: #2a78d6; /* kit-ui-check-ignore: app token definition */
   --chart-series-2: #1baf7a; /* kit-ui-check-ignore: app token definition */
   --chart-series-3: #eda100; /* kit-ui-check-ignore: app token definition */
   --chart-series-4: #008300; /* kit-ui-check-ignore: app token definition */
   --chart-series-5: #4a3aa7; /* kit-ui-check-ignore: app token definition */
   --chart-series-6: #e34948; /* kit-ui-check-ignore: app token definition */
+  --chart-series-7: #117733; /* kit-ui-check-ignore: app token definition */
+  --chart-series-8: #44aa99; /* kit-ui-check-ignore: app token definition */
+  --chart-series-9: #332288; /* kit-ui-check-ignore: app token definition */
+  --chart-series-10: #aa3377; /* kit-ui-check-ignore: app token definition */
+  --chart-series-11: #882255; /* kit-ui-check-ignore: app token definition */
+  --chart-series-12: #aa4499; /* kit-ui-check-ignore: app token definition */
+  --chart-series-13: #999933; /* kit-ui-check-ignore: app token definition */
+  --chart-series-14: #ccbb44; /* kit-ui-check-ignore: app token definition */
+  --chart-series-15: #88ccee; /* kit-ui-check-ignore: app token definition */
+  --chart-series-16: #ddcc77; /* kit-ui-check-ignore: app token definition */
+  --chart-series-17: #cc6677; /* kit-ui-check-ignore: app token definition */
+  --chart-series-18: #66ccee; /* kit-ui-check-ignore: app token definition */
+  --chart-series-19: #5c6066; /* kit-ui-check-ignore: app token definition */
+  --chart-series-20: #8c564b; /* kit-ui-check-ignore: app token definition */
   --chart-series-other: #898781; /* kit-ui-check-ignore: app token definition */
   /* Duration UX state colors */
   --slow-fg: #f29070; /* kit-ui-check-ignore: app token definition */
@@ -136,13 +152,28 @@
   --accent-cyan-foreground: #07111f; /* kit-ui-check-ignore: app token definition */
   --accent-violet-foreground: #07111f; /* kit-ui-check-ignore: app token definition */
   /* Same series hues stepped for the dark surface, not an automatic flip;
-     validated as a set against the dark surface. */
+     validated as a set against the dark surface. Slots 7-20 brighten the
+     extended Tol hues for legibility on the dark surface. */
   --chart-series-1: #3987e5; /* kit-ui-check-ignore: app token definition */
   --chart-series-2: #199e70; /* kit-ui-check-ignore: app token definition */
   --chart-series-3: #c98500; /* kit-ui-check-ignore: app token definition */
   --chart-series-4: #008300; /* kit-ui-check-ignore: app token definition */
   --chart-series-5: #9085e9; /* kit-ui-check-ignore: app token definition */
   --chart-series-6: #e66767; /* kit-ui-check-ignore: app token definition */
+  --chart-series-7: #2bb673; /* kit-ui-check-ignore: app token definition */
+  --chart-series-8: #5cc4b3; /* kit-ui-check-ignore: app token definition */
+  --chart-series-9: #6a7ae8; /* kit-ui-check-ignore: app token definition */
+  --chart-series-10: #d65ba6; /* kit-ui-check-ignore: app token definition */
+  --chart-series-11: #c45a7e; /* kit-ui-check-ignore: app token definition */
+  --chart-series-12: #d77ec9; /* kit-ui-check-ignore: app token definition */
+  --chart-series-13: #c3c34a; /* kit-ui-check-ignore: app token definition */
+  --chart-series-14: #e8d65a; /* kit-ui-check-ignore: app token definition */
+  --chart-series-15: #9fdcf5; /* kit-ui-check-ignore: app token definition */
+  --chart-series-16: #e8dca0; /* kit-ui-check-ignore: app token definition */
+  --chart-series-17: #e08090; /* kit-ui-check-ignore: app token definition */
+  --chart-series-18: #8fd9f5; /* kit-ui-check-ignore: app token definition */
+  --chart-series-19: #9aa0a8; /* kit-ui-check-ignore: app token definition */
+  --chart-series-20: #c08070; /* kit-ui-check-ignore: app token definition */
   --chart-series-other: #898781; /* kit-ui-check-ignore: app token definition */
   --user-bg: #111827; /* kit-ui-check-ignore: app token definition */
   --assistant-bg: #141220; /* kit-ui-check-ignore: app token definition */

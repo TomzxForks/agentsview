@@ -85,6 +85,7 @@ type Store interface {
 	GetAnalyticsHourOfWeek(ctx context.Context, f AnalyticsFilter) (HourOfWeekResponse, error)
 	GetAnalyticsSessionShape(ctx context.Context, f AnalyticsFilter) (SessionShapeResponse, error)
 	GetAnalyticsTools(ctx context.Context, f AnalyticsFilter) (ToolsAnalyticsResponse, error)
+	GetAnalyticsToolCalls(ctx context.Context, f AnalyticsFilter, toolName, category string, limit int) (ToolCallsResponse, error)
 	GetAnalyticsSkills(ctx context.Context, f AnalyticsFilter, granularity string) (SkillsAnalyticsResponse, error)
 	GetAnalyticsVelocity(ctx context.Context, f AnalyticsFilter) (VelocityResponse, error)
 	GetAnalyticsTPS(ctx context.Context, f AnalyticsFilter) (TPSResponse, error)

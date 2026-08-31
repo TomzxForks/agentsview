@@ -2,6 +2,18 @@
   import { analytics } from "../../stores/analytics.svelte.js";
   import type { ToolCategoryCount } from "../../api/types.js";
   import { m } from "../../i18n/index.js";
+  import { formatDuration } from "../../utils/duration.js";
+  import { formatNumber } from "../../utils/format.js";
+  import ToolCallDrilldown from "./ToolCallDrilldown.svelte";
+
+  let drilldown = $state<{
+    toolName: string;
+    category: string;
+  } | null>(null);
+
+  function openDrilldown(toolName: string, category: string) {
+    drilldown = { toolName, category };
+  }
 
   const CATEGORY_COLORS: Record<string, string> = {
     Read: "#3b82f6",
@@ -151,17 +163,28 @@
                   class="tool-dot"
                   style="background: {colorFor(tool.category)}"
                 ></span>
-                <span class="tool-name" title={tool.tool_name}>
+                <button
+                  type="button"
+                  class="tool-name"
+                  title={m.analytics_tool_usage_view_calls()}
+                  onclick={() => openDrilldown(tool.tool_name, tool.category)}
+                >
                   {tool.tool_name}
-                </span>
+                </button>
                 <span class="tool-category">{tool.category}</span>
                 <span class="tool-count">
                   {tool.call_count.toLocaleString()}
                 </span>
+                <span
+                  class="tool-duration"
+                  title={m.analytics_tool_usage_duration_title()}
+                >
+                  {formatDuration(tool.total_duration_ms)}
+                </span>
                 <span class="tool-sessions">
                   {m.analytics_tool_usage_sessions({
                     count: tool.session_count,
-                    countLabel: tool.session_count.toLocaleString(),
+                    countLabel: formatNumber(tool.session_count),
                   })}
                 </span>
                 <span class="tool-pct">{tool.pct}%</span>
@@ -236,6 +259,14 @@
   {/if}
 </div>
 
+{#if drilldown}
+  <ToolCallDrilldown
+    toolName={drilldown.toolName}
+    category={drilldown.category}
+    onclose={() => (drilldown = null)}
+  />
+{/if}
+
 <style>
   .tool-container {
     position: relative;
@@ -283,7 +314,9 @@
 
   .tool-row {
     display: grid;
-    grid-template-columns: 8px minmax(80px, 1fr) minmax(52px, 72px) 48px 72px 40px;
+    grid-template-columns:
+      8px minmax(80px, 1fr) minmax(52px, 72px) 44px 60px 72px
+      40px;
     align-items: center;
     gap: 8px;
     min-height: 28px;
@@ -309,7 +342,24 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     color: var(--text-primary);
+    background: transparent;
+    border: 0;
+    padding: 0;
+    font: inherit;
     font-weight: 500;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .tool-name:hover {
+    color: var(--accent-blue);
+    text-decoration: underline;
+  }
+
+  .tool-name:focus-visible {
+    outline: 1px solid currentColor;
+    outline-offset: 2px;
+    border-radius: 2px;
   }
 
   .tool-category {
@@ -321,6 +371,7 @@
   }
 
   .tool-count,
+  .tool-duration,
   .tool-sessions,
   .tool-pct {
     text-align: right;
@@ -330,7 +381,7 @@
 
   @media (max-width: 640px) {
     .tool-row {
-      grid-template-columns: 8px minmax(0, 1fr) 44px 36px;
+      grid-template-columns: 8px minmax(0, 1fr) 44px 60px 36px;
     }
 
     .tool-category,

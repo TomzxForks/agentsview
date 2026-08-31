@@ -2635,9 +2635,13 @@ func TestAnalyticsToolsToolCallsQueryAggregatesInSQL(t *testing.T) {
 	normalized := strings.Join(strings.Fields(strings.ToLower(q)), " ")
 
 	assert.Contains(t, normalized,
-		"select tc.session_id, tc.category, trim(coalesce(tc.tool_name, '')), count(*)")
+		"select sid, category, tool_name, count(*), coalesce(sum(")
 	assert.Contains(t, normalized,
-		"group by tc.session_id, tc.category, trim(coalesce(tc.tool_name, ''))")
+		"group by sid, category, tool_name")
+	// Per-call durations are aggregated in SQL from the shared
+	// tool_result_events / sub-agent duration inputs.
+	assert.Contains(t, normalized, "julianday(sub_end)")
+	assert.Contains(t, normalized, "julianday(exec_completed)")
 }
 
 func TestGetAnalyticsToolsModelFilterCountsOnlyMatchingToolCalls(

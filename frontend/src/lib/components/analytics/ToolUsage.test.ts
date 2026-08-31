@@ -4,6 +4,16 @@ import { mount, tick, unmount } from "svelte";
 // @ts-ignore
 import ToolUsage from "./ToolUsage.svelte";
 import { analytics } from "../../stores/analytics.svelte.js";
+// @ts-ignore
+import { AnalyticsService } from "../../api/generated/index.js";
+
+function requireNonNull<T>(
+  value: T | null | undefined,
+  label: string,
+): T {
+  if (value == null) throw new Error(`missing ${label}`);
+  return value;
+}
 
 describe("ToolUsage", () => {
   afterEach(() => {
@@ -30,6 +40,7 @@ describe("ToolUsage", () => {
           tool_name: "Read",
           category: "Read",
           call_count: 3,
+          total_duration_ms: 4500,
           session_count: 2,
           pct: 50,
         },
@@ -37,6 +48,7 @@ describe("ToolUsage", () => {
           tool_name: "Bash",
           category: "Bash",
           call_count: 2,
+          total_duration_ms: 1200,
           session_count: 1,
           pct: 33.3,
         },
@@ -61,6 +73,8 @@ describe("ToolUsage", () => {
     expect(document.body.textContent).toContain("Top tools");
     expect(document.body.textContent).toContain("Read");
     expect(document.body.textContent).toContain("3");
+    expect(document.body.textContent).toContain("4.5s");
+    expect(document.body.textContent).toContain("1.2s");
     expect(document.body.textContent).toContain("2 sessions");
     expect(document.body.textContent).toContain("50%");
     expect(document.body.textContent).toContain("Bash");
@@ -69,6 +83,88 @@ describe("ToolUsage", () => {
     expect(document.body.textContent).toContain("33.3%");
     expect(document.body.textContent).toContain("By Category");
     expect(document.body.textContent).toContain("Weekly Trend");
+
+    unmount(component);
+  });
+
+  it("opens the per-tool call drilldown from a tool name", async () => {
+    const callsSpy = vi
+      .spyOn(AnalyticsService, "getApiV1AnalyticsToolsCalls")
+      .mockResolvedValue({
+        tool_name: "Read",
+        category: "Read",
+        total_calls: 2,
+        total_duration_ms: 5000,
+        session_count: 1,
+        truncated: false,
+        sessions: [
+          {
+            session_id: "s1",
+            project: "alpha",
+            agent: "claude",
+            started_at: "2024-06-01T09:00:00Z",
+            display_name: "Alpha session",
+            first_message: null,
+            call_count: 2,
+            total_duration_ms: 5000,
+            calls: [
+              {
+                tool_use_id: "tu_1",
+                category: "Read",
+                duration_ms: 3000,
+                started_at: "2024-06-01T09:00:01Z",
+                message_ordinal: 1,
+                input_preview: "a.go",
+              },
+              {
+                tool_use_id: "tu_2",
+                category: "Read",
+                duration_ms: 2000,
+                started_at: "2024-06-01T09:00:02Z",
+                message_ordinal: 2,
+                input_preview: "b.go",
+              },
+            ],
+          },
+        ],
+      });
+    analytics.tools = {
+      total_calls: 3,
+      by_category: [{ category: "Read", count: 3, pct: 100 }],
+      by_agent: [],
+      by_tool: [
+        {
+          tool_name: "Read",
+          category: "Read",
+          call_count: 3,
+          total_duration_ms: 5000,
+          session_count: 2,
+          pct: 100,
+        },
+      ],
+      trend: [],
+    };
+
+    const component = mount(ToolUsage, { target: document.body });
+    await tick();
+
+    const toolNameButton = requireNonNull(
+      document.body.querySelector<HTMLButtonElement>(".tool-name"),
+      "tool name button",
+    );
+    toolNameButton.click();
+    await vi.waitFor(() => {
+      expect(document.body.textContent).toContain("Alpha session");
+    });
+
+    expect(callsSpy).toHaveBeenCalled();
+    expect(document.body.textContent).toContain("Tool calls: Read");
+    expect(document.body.textContent).toContain("2 calls");
+    expect(document.body.textContent).toContain("Total time 5.0s");
+    expect(document.body.textContent).toContain("1 session");
+    expect(document.body.textContent).toContain("Alpha session");
+    expect(document.body.textContent).toContain("3.0s");
+    expect(document.body.textContent).toContain("2.0s");
 
     unmount(component);
   });

@@ -455,6 +455,12 @@ class AnalyticsStore {
     return this.filterParams({ includeModel: false });
   }
 
+  // Per-tool drilldown fetches use the same scope as the tool usage
+  // card, so the drilldown totals agree with the table.
+  toolUsageDrilldownParams(): AnalyticsParams {
+    return this.filterParams();
+  }
+
   private async executeFetch<T>(
     panel: Panel,
     fetchRequest: (options?: { signal?: AbortSignal }) => Promise<T>,

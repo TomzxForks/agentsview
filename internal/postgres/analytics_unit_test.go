@@ -183,17 +183,43 @@ func (c *analyticsProbeConn) QueryContext(
 			return nil, errors.New(
 				"tool call query must project trimmed tool_name")
 		}
-		if !strings.Contains(normalized, "group by session_id, category") {
-			if !strings.Contains(normalized,
-				"group by tc.session_id, tc.category") {
-				return nil, errors.New(
-					"tool call query must group by session_id, category")
-			}
+		if !strings.Contains(normalized, "group by session_id, category") &&
+			!strings.Contains(normalized, "group by sid, category") &&
+			!strings.Contains(normalized, "group by tc.session_id, tc.category") {
+			return nil, errors.New(
+				"tool call query must group by session_id, category")
 		}
 		if !strings.Contains(normalized,
 			"trim(coalesce(tc.tool_name") {
 			return nil, errors.New(
 				"tool call query must group by tool_name")
+		}
+		if strings.Contains(normalized, "sum(case") {
+			// Duration aggregation variant: totals must stay in SQL.
+			if !strings.Contains(normalized, "extract(epoch") {
+				return nil, errors.New(
+					"tool call duration query must aggregate in SQL")
+			}
+			return &analyticsProbeRows{
+				columns: []string{
+					"session_id", "category", "tool_name", "count",
+					"duration", "timestamp",
+				},
+				values: [][]driver.Value{
+					{
+						"s1", "Read", "Read", int64(2), int64(120),
+						"2024-06-03T09:00:00Z",
+					},
+					{
+						"s1", "Bash", "Bash", int64(1), int64(30),
+						"2024-06-03T09:00:00Z",
+					},
+					{
+						"s2", "Read", "Read", int64(1), int64(60),
+						"2024-06-04T09:00:00Z",
+					},
+				},
+			}, nil
 		}
 		if strings.Contains(normalized, "to_char(") {
 			return &analyticsProbeRows{
@@ -286,6 +312,8 @@ func TestGetAnalyticsToolsAggregatesToolCallsInSQL(t *testing.T) {
 	assert.Equal(t, "Read", resp.ByTool[0].ToolName)
 	assert.Equal(t, 3, resp.ByTool[0].CallCount)
 	assert.Equal(t, 2, resp.ByTool[0].SessionCount)
+	// The probe's canned rows sum to 120 + 60 for Read.
+	assert.Equal(t, int64(180), resp.ByTool[0].TotalDurationMs)
 }
 
 func TestGetAnalyticsSkillsAggregatesToolCallsInSQL(t *testing.T) {

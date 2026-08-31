@@ -22,6 +22,7 @@ func (s *Server) registerAnalyticsRoutes() {
 	s.get(group, "/velocity", "Get velocity analytics", s.humaAnalyticsVelocity)
 	s.get(group, "/tps", "Get TPS analytics", s.humaAnalyticsTPS)
 	s.get(group, "/tools", "Get tool analytics", s.humaAnalyticsTools)
+	s.get(group, "/tools/calls", "Get per-tool call timings", s.humaAnalyticsToolCalls)
 	s.get(group, "/skills", "Get skill analytics", s.humaAnalyticsSkills)
 	s.get(group, "/top-sessions", "Get top sessions", s.humaAnalyticsTopSessions)
 	s.get(group, "/signals", "Get signal analytics", s.humaAnalyticsSignals)
@@ -254,6 +255,30 @@ func (s *Server) humaAnalyticsTools(
 		return nil, internalError("analytics error", err)
 	}
 	return &jsonOutput[db.ToolsAnalyticsResponse]{Body: result}, nil
+}
+
+type analyticsToolCallsInput struct {
+	AnalyticsFilterInput
+	ToolName string `query:"tool_name" required:"true" doc:"Tool name to drill into"`
+	Category string `query:"category" doc:"Optional tool category to disambiguate the tool name"`
+	Limit    int    `query:"limit" minimum:"1" maximum:"20000" default:"2000" doc:"Maximum number of calls returned (totals always cover every call)"`
+}
+
+func (s *Server) humaAnalyticsToolCalls(
+	ctx context.Context,
+	in *analyticsToolCallsInput,
+) (*jsonOutput[db.ToolCallsResponse], error) {
+	f, err := analyticsFilterFromInput(in.AnalyticsFilterInput)
+	if err != nil {
+		return nil, err
+	}
+	result, err := s.db.GetAnalyticsToolCalls(
+		ctx, f, in.ToolName, in.Category, in.Limit,
+	)
+	if err != nil {
+		return nil, internalError("analytics tool calls error", err)
+	}
+	return &jsonOutput[db.ToolCallsResponse]{Body: result}, nil
 }
 
 func (s *Server) humaAnalyticsSkills(

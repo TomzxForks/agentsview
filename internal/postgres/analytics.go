@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"math"
 	"sort"
@@ -2169,6 +2170,7 @@ func (s *Store) GetAnalyticsTools(
 	err = pgQueryChunked(sessionIDs,
 		func(chunk []string) error {
 			chunkPB := &paramBuilder{}
+			nowPh := chunkPB.add(time.Now().UTC())
 			ph := pgInPlaceholders(chunk, chunkPB)
 			preds := []string{"tc.session_id IN " + ph}
 			preds = appendPGAnalyticsCSVFilter(
@@ -2179,17 +2181,52 @@ func (s *Store) GetAnalyticsTools(
 			}
 			msgTSExpr := `COALESCE(TO_CHAR(MAX(m.timestamp) AT TIME ZONE 'UTC', ` +
 				`'YYYY-MM-DD"T"HH24:MI:SS"Z"'), '')`
-			q := `SELECT tc.session_id, tc.category,
-				TRIM(COALESCE(tc.tool_name, '')), COUNT(*),
-				` + msgTSExpr + `
-				FROM tool_calls tc
-				LEFT JOIN messages m
-					ON m.session_id = tc.session_id
-					AND m.ordinal = tc.message_ordinal`
-			q += `
-				WHERE ` + strings.Join(preds, " AND ") + `
-				GROUP BY tc.session_id, tc.category,
-					TRIM(COALESCE(tc.tool_name, '')), date_trunc('minute', m.timestamp)`
+			msgTSExpr := `COALESCE(TO_CHAR(MAX(ts) AT TIME ZONE 'UTC', ` +
+				`'YYYY-MM-DD"T"HH24:MI:SS"Z"'), '')`
+			q := `SELECT sid, category, tool_name, COUNT(*),
+					COALESCE(SUM(` + pgToolsDurationExpr() + `), 0),
+					` + msgTSExpr + `
+				FROM (
+				  SELECT
+				    tc.session_id AS sid,
+				    tc.category AS category,
+				    TRIM(COALESCE(tc.tool_name, '')) AS tool_name,
+				    m.timestamp AS ts,
+				    s_sub.started_at AS sub_started,
+				    COALESCE(s_sub.ended_at, ` + nowPh + `::timestamptz) AS sub_end,
+				    (tc.subagent_session_id IS NOT NULL) AS is_sub,
+				    (
+				      SELECT tre.timestamp
+				      FROM tool_result_events tre
+				      WHERE tre.session_id = tc.session_id
+				        AND tre.tool_call_message_ordinal = tc.message_ordinal
+				        AND tre.call_index = tc.call_index
+				        AND tre.source = 'tool_execution'
+				        AND tre.status = 'started'
+				        AND tre.timestamp IS NOT NULL
+				      ORDER BY tre.event_index ASC
+				      LIMIT 1
+				    ) AS exec_started,
+				    (
+				      SELECT tre.timestamp
+				      FROM tool_result_events tre
+				      WHERE tre.session_id = tc.session_id
+				        AND tre.tool_call_message_ordinal = tc.message_ordinal
+				        AND tre.call_index = tc.call_index
+				        AND tre.source = 'tool_execution'
+				        AND tre.status IN ('completed', 'errored')
+				        AND tre.timestamp IS NOT NULL
+				      ORDER BY tre.event_index DESC
+				      LIMIT 1
+				    ) AS exec_completed
+				  FROM tool_calls tc
+				  LEFT JOIN messages m
+				    ON m.session_id = tc.session_id
+				    AND m.ordinal = tc.message_ordinal
+				  LEFT JOIN sessions s_sub
+				    ON s_sub.id = tc.subagent_session_id
+				  WHERE ` + strings.Join(preds, " AND ") + `
+				) GROUP BY sid, category, tool_name, date_trunc('minute', ts)`
 			rows, qErr := s.pg.QueryContext(
 				ctx, q, chunkPB.args...,
 			)
@@ -2202,8 +2239,9 @@ func (s *Store) GetAnalyticsTools(
 			for rows.Next() {
 				var sid, cat, toolName, ts string
 				var count int
+				var dur int64
 				if err := rows.Scan(
-					&sid, &cat, &toolName, &count, &ts,
+					&sid, &cat, &toolName, &count, &dur, &ts,
 				); err != nil {
 					return fmt.Errorf(
 						"scanning tool_call: %w", err,
@@ -2220,12 +2258,13 @@ func (s *Store) GetAnalyticsTools(
 					continue
 				}
 				toolRows = append(toolRows, db.ToolAnalyticsRow{
-					SessionID: sid,
-					Category:  cat,
-					ToolName:  toolName,
-					Agent:     info.agent,
-					Count:     count,
-					Date:      date,
+					SessionID:  sid,
+					Category:   cat,
+					ToolName:   toolName,
+					Agent:      info.agent,
+					Count:      count,
+					DurationMs: dur,
+					Date:       date,
 				})
 			}
 			return rows.Err()
@@ -2238,6 +2277,241 @@ func (s *Store) GetAnalyticsTools(
 		return resp, nil
 	}
 	return db.BuildToolsAnalytics(toolRows), nil
+}
+
+// pgToolsDurationExpr turns the per-call duration inputs (sub_started,
+// sub_end, is_sub, exec_started, exec_completed — column aliases of the
+// derived table this is evaluated over) into a PG milliseconds
+// expression, mirroring the per-call rules of session_timing.go.
+func pgToolsDurationExpr() string {
+	return `CASE
+				  WHEN is_sub AND sub_started IS NOT NULL THEN
+				    (round(EXTRACT(EPOCH FROM (
+				      sub_end - sub_started
+				    )) * 1000))::bigint
+				  WHEN exec_completed IS NOT NULL
+				       AND exec_started IS NOT NULL
+				       AND exec_completed >= exec_started THEN
+				    (round(EXTRACT(EPOCH FROM (
+				      exec_completed - exec_started
+				    )) * 1000))::bigint
+				  ELSE NULL
+				END`
+}
+
+// pgToolCallsInputColumns lists the per-call duration input columns of
+// the derived table shared by the per-tool drill-down queries.
+func pgToolCallsInputColumns(nowPh string) string {
+	return `
+				    s_sub.started_at AS sub_started,
+				    COALESCE(s_sub.ended_at, ` + nowPh + `::timestamptz) AS sub_end,
+				    (tc.subagent_session_id IS NOT NULL) AS is_sub,
+				    (
+				      SELECT tre.timestamp
+				      FROM tool_result_events tre
+				      WHERE tre.session_id = tc.session_id
+				        AND tre.tool_call_message_ordinal = tc.message_ordinal
+				        AND tre.call_index = tc.call_index
+				        AND tre.source = 'tool_execution'
+				        AND tre.status = 'started'
+				        AND tre.timestamp IS NOT NULL
+				      ORDER BY tre.event_index ASC
+				      LIMIT 1
+				    ) AS exec_started,
+				    (
+				      SELECT tre.timestamp
+				      FROM tool_result_events tre
+				      WHERE tre.session_id = tc.session_id
+				        AND tre.tool_call_message_ordinal = tc.message_ordinal
+				        AND tre.call_index = tc.call_index
+				        AND tre.source = 'tool_execution'
+				        AND tre.status IN ('completed', 'errored')
+				        AND tre.timestamp IS NOT NULL
+				      ORDER BY tre.event_index DESC
+				      LIMIT 1
+				    ) AS exec_completed`
+}
+
+// GetAnalyticsToolCalls returns every call of one tool across the
+// filtered sessions, grouped per session with per-call durations.
+// Mirrors the SQLite implementation in internal/db/analytics.go; only
+// the dialect-specific SQL changes (messages keyed by ordinal, PG
+// timestamp math).
+func (s *Store) GetAnalyticsToolCalls(
+	ctx context.Context, f db.AnalyticsFilter,
+	toolName, category string, limit int,
+) (db.ToolCallsResponse, error) {
+	trimmed := strings.TrimSpace(toolName)
+	resp := db.ToolCallsResponse{
+		ToolName: trimmed,
+		Category: category,
+		Sessions: []db.ToolCallSessionGroup{},
+	}
+	if trimmed == "" {
+		return resp, nil
+	}
+
+	pb := &paramBuilder{}
+	where := buildAnalyticsWhereWithoutDate(f, pb)
+
+	sessQ := `SELECT id, ` + pgDateCol + `, agent, project,
+			COALESCE(display_name, session_name), first_message
+		FROM sessions WHERE ` + where
+
+	sessRows, err := s.pg.QueryContext(ctx, sessQ, pb.args...)
+	if err != nil {
+		return db.ToolCallsResponse{},
+			fmt.Errorf("querying tool call sessions: %w", err)
+	}
+	defer sessRows.Close()
+
+	meta := make(map[string]db.ToolCallSessionMeta)
+	var sessionIDs []string
+	for sessRows.Next() {
+		var id, agent, project string
+		var ts *time.Time
+		var displayName, firstMessage sql.NullString
+		if err := sessRows.Scan(
+			&id, &ts, &agent, &project, &displayName, &firstMessage,
+		); err != nil {
+			return db.ToolCallsResponse{},
+				fmt.Errorf("scanning tool call session: %w", err)
+		}
+		m := db.ToolCallSessionMeta{
+			Project:   project,
+			Agent:     agent,
+			StartedAt: scanDateCol(ts),
+		}
+		if displayName.Valid {
+			v := displayName.String
+			m.DisplayName = &v
+		}
+		if firstMessage.Valid {
+			v := firstMessage.String
+			m.FirstMessage = &v
+		}
+		meta[id] = m
+		sessionIDs = append(sessionIDs, id)
+	}
+	if err := sessRows.Err(); err != nil {
+		return db.ToolCallsResponse{},
+			fmt.Errorf("iterating tool call sessions: %w", err)
+	}
+	if len(sessionIDs) == 0 {
+		return resp, nil
+	}
+
+	var callRows []db.ToolCallTimingRow
+	err = pgQueryChunked(sessionIDs,
+		func(chunk []string) error {
+			chunkPB := &paramBuilder{}
+			nowPh := chunkPB.add(time.Now().UTC())
+			ph := pgInPlaceholders(chunk, chunkPB)
+			preds := []string{
+				"tc.session_id IN " + ph,
+				"TRIM(COALESCE(tc.tool_name, '')) = " +
+					chunkPB.add(trimmed),
+			}
+			if category != "" {
+				preds = append(preds,
+					"tc.category = "+chunkPB.add(category))
+			}
+			preds = appendPGAnalyticsCSVFilter(
+				preds, "m.model", f.Model, chunkPB,
+			)
+			msgTSExpr := `COALESCE(TO_CHAR(m.timestamp AT TIME ZONE 'UTC', ` +
+				`'YYYY-MM-DD"T"HH24:MI:SS"Z"'), '')`
+			q := `SELECT sid, category, tool_name, tool_use_id,
+					skill_name, subagent_session_id, input_json, ts,
+					ordinal,
+					` + pgToolsDurationExpr() + `
+				FROM (
+				  SELECT
+				    tc.session_id AS sid,
+				    tc.category AS category,
+				    TRIM(COALESCE(tc.tool_name, '')) AS tool_name,
+				    tc.tool_use_id AS tool_use_id,
+				    tc.skill_name AS skill_name,
+				    tc.subagent_session_id AS subagent_session_id,
+				    COALESCE(tc.input_json, '') AS input_json,
+				    ` + msgTSExpr + ` AS ts,
+				    tc.message_ordinal AS ordinal,
+				    tc.call_index AS call_index,` +
+				pgToolCallsInputColumns(nowPh) + `
+				  FROM tool_calls tc
+				  LEFT JOIN messages m
+				    ON m.session_id = tc.session_id
+				    AND m.ordinal = tc.message_ordinal
+				  LEFT JOIN sessions s_sub
+				    ON s_sub.id = tc.subagent_session_id
+				  WHERE ` + strings.Join(preds, " AND ") + `
+				) ORDER BY sid, ordinal, call_index`
+			rows, qErr := s.pg.QueryContext(
+				ctx, q, chunkPB.args...,
+			)
+			if qErr != nil {
+				return fmt.Errorf(
+					"querying tool calls: %w", qErr,
+				)
+			}
+			defer rows.Close()
+			for rows.Next() {
+				var sid, cat, name, ts string
+				var ordinal int
+				var toolUseID, inputJSON sql.NullString
+				var skill, sub sql.NullString
+				var dur sql.NullInt64
+				if err := rows.Scan(
+					&sid, &cat, &name, &toolUseID, &skill,
+					&sub, &inputJSON, &ts, &ordinal, &dur,
+				); err != nil {
+					return fmt.Errorf(
+						"scanning tool call: %w", err,
+					)
+				}
+				info, ok := meta[sid]
+				if !ok {
+					continue
+				}
+				usedTS, _, keep := f.ResolveSkillRowTime(
+					ts, info.StartedAt,
+				)
+				if !keep {
+					continue
+				}
+				row := db.ToolCallTimingRow{
+					SessionID:      sid,
+					Category:       cat,
+					ToolName:       name,
+					InputJSON:      inputJSON.String,
+					Timestamp:      usedTS,
+					MessageOrdinal: ordinal,
+				}
+				if toolUseID.Valid {
+					row.ToolUseID = toolUseID.String
+				}
+				if skill.Valid {
+					v := skill.String
+					row.SkillName = &v
+				}
+				if sub.Valid {
+					v := sub.String
+					row.SubagentSessionID = &v
+				}
+				if dur.Valid {
+					v := dur.Int64
+					row.DurationMs = &v
+				}
+				callRows = append(callRows, row)
+			}
+			return rows.Err()
+		})
+	if err != nil {
+		return db.ToolCallsResponse{}, err
+	}
+
+	return db.BuildAnalyticsToolCalls(trimmed, category, meta, callRows, limit),
+		nil
 }
 
 // GetAnalyticsSkills returns skill usage analytics. granularity picks

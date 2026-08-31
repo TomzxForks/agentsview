@@ -537,6 +537,42 @@
       }
     }
   ],
+  "analytics_tool_usage_duration_title": "工具总耗时",
+  "analytics_tool_usage_view_calls": "查看各会话中的调用",
+  "analytics_tool_calls_title": "工具调用：{tool}",
+  "analytics_tool_calls_close": "关闭",
+  "analytics_tool_calls_call_count": [
+    {
+      "declarations": ["input count", "input countLabel", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=other": "{countLabel} 次调用"
+      }
+    }
+  ],
+  "analytics_tool_calls_session_count": [
+    {
+      "declarations": ["input count", "input countLabel", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=other": "{countLabel} 个会话"
+      }
+    }
+  ],
+  "analytics_tool_calls_total_duration": "总耗时 {duration}",
+  "analytics_tool_calls_open_session": "打开会话",
+  "analytics_tool_calls_open_call": "在会话中打开该调用",
+  "analytics_tool_calls_loading": "正在加载工具调用...",
+  "analytics_tool_calls_empty": "没有工具调用记录",
+  "analytics_tool_calls_truncated": [
+    {
+      "declarations": ["input count", "input countLabel", "input totalCount", "input totalCountLabel", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=other": "显示 {totalCountLabel} 次调用中的 {countLabel} 次"
+      }
+    }
+  ],
   "analytics_by_category": "按类别",
   "analytics_by_agent": "按 Agent",
   "analytics_by_project": "按项目",

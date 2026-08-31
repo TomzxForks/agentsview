@@ -537,6 +537,42 @@
       }
     }
   ],
+  "analytics_tool_usage_duration_title": "工具總耗時",
+  "analytics_tool_usage_view_calls": "查看各對話中的呼叫",
+  "analytics_tool_calls_title": "工具呼叫：{tool}",
+  "analytics_tool_calls_close": "關閉",
+  "analytics_tool_calls_call_count": [
+    {
+      "declarations": ["input count", "input countLabel", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=other": "{countLabel} 次呼叫"
+      }
+    }
+  ],
+  "analytics_tool_calls_session_count": [
+    {
+      "declarations": ["input count", "input countLabel", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=other": "{countLabel} 個對話"
+      }
+    }
+  ],
+  "analytics_tool_calls_total_duration": "總耗時 {duration}",
+  "analytics_tool_calls_open_session": "開啟對話",
+  "analytics_tool_calls_open_call": "在對話中開啟此呼叫",
+  "analytics_tool_calls_loading": "正在載入工具呼叫...",
+  "analytics_tool_calls_empty": "沒有工具呼叫紀錄",
+  "analytics_tool_calls_truncated": [
+    {
+      "declarations": ["input count", "input countLabel", "input totalCount", "input totalCountLabel", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=other": "顯示 {totalCountLabel} 次呼叫中的 {countLabel} 次"
+      }
+    }
+  ],
   "analytics_by_category": "按類別",
   "analytics_by_agent": "按 Agent",
   "analytics_by_project": "按專案",

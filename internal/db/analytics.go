@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"math"
@@ -2653,11 +2654,15 @@ type ToolAgentBreakdown struct {
 
 // ToolUsageAnalysis holds ranked usage for one concrete tool name.
 type ToolUsageAnalysis struct {
-	ToolName     string  `json:"tool_name"`
-	Category     string  `json:"category"`
-	CallCount    int     `json:"call_count"`
-	SessionCount int     `json:"session_count"`
-	Pct          float64 `json:"pct"`
+	ToolName  string `json:"tool_name"`
+	Category  string `json:"category"`
+	CallCount int    `json:"call_count"`
+	// TotalDurationMs sums the measurable per-call durations. Calls
+	// without a measurable duration (parallel siblings with no
+	// tool_result_events coverage) contribute their count but no time.
+	TotalDurationMs int64   `json:"total_duration_ms"`
+	SessionCount    int     `json:"session_count"`
+	Pct             float64 `json:"pct"`
 }
 
 // ToolTrendEntry holds tool call counts for one time bucket.
@@ -2684,6 +2689,9 @@ type ToolAnalyticsRow struct {
 	Agent     string
 	Date      string
 	Count     int
+	// DurationMs is the sum of the chunk's measurable per-call
+	// durations for this (session, category, tool) group.
+	DurationMs int64
 }
 
 // SkillAgentBreakdown holds skill usage for one agent.
@@ -2739,6 +2747,7 @@ type toolUsageAccumulator struct {
 	toolName   string
 	category   string
 	callCount  int
+	durationMs int64
 	sessionIDs map[string]struct{}
 }
 
@@ -2794,6 +2803,7 @@ func BuildToolsAnalytics(rows []ToolAnalyticsRow) ToolsAnalyticsResponse {
 			toolCounts[key] = acc
 		}
 		acc.callCount += row.Count
+		acc.durationMs += row.DurationMs
 		if row.SessionID != "" {
 			acc.sessionIDs[row.SessionID] = struct{}{}
 		}
@@ -2861,11 +2871,12 @@ func BuildToolsAnalytics(rows []ToolAnalyticsRow) ToolsAnalyticsResponse {
 			float64(acc.callCount)/float64(resp.TotalCalls)*1000,
 		) / 10
 		resp.ByTool = append(resp.ByTool, ToolUsageAnalysis{
-			ToolName:     acc.toolName,
-			Category:     acc.category,
-			CallCount:    acc.callCount,
-			SessionCount: len(acc.sessionIDs),
-			Pct:          pct,
+			ToolName:        acc.toolName,
+			Category:        acc.category,
+			CallCount:       acc.callCount,
+			TotalDurationMs: acc.durationMs,
+			SessionCount:    len(acc.sessionIDs),
+			Pct:             pct,
 		})
 	}
 	sort.Slice(resp.ByTool, func(i, j int) bool {
@@ -3062,38 +3073,107 @@ func skillProjectBreakdowns(
 	return out
 }
 
+// analyticsToolsPerCallExprs lists the per-call duration inputs shared
+// by the tools aggregation and the per-tool drill-down queries. The
+// scalar subqueries mirror GetSessionTiming's per-call duration rules:
+// sub-agent calls measure the child session's wall time (falling back
+// to the tool_execution events when the child has no start timestamp),
+// other calls measure started -> completed/errored event time and drop
+// non-monotonic pairs.
+func analyticsToolsPerCallExprs(nowParam string) string {
+	return `
+			COALESCE(s_sub.ended_at, ` + nowParam + `) AS sub_end,
+			CASE
+			  WHEN tc.subagent_session_id IS NOT NULL
+			       AND s_sub.started_at IS NOT NULL THEN 1
+			  ELSE 0
+			END AS is_sub,
+			(
+			  SELECT tre.timestamp
+			  FROM tool_result_events tre
+			  WHERE tre.session_id = tc.session_id
+			    AND tre.tool_call_message_ordinal = m.ordinal
+			    AND tre.call_index = tc.call_index
+			    AND tre.source = 'tool_execution'
+			    AND tre.status = 'started'
+			    AND NULLIF(tre.timestamp, '') IS NOT NULL
+			  ORDER BY tre.event_index ASC
+			  LIMIT 1
+			) AS exec_started,
+			(
+			  SELECT tre.timestamp
+			  FROM tool_result_events tre
+			  WHERE tre.session_id = tc.session_id
+			    AND tre.tool_call_message_ordinal = m.ordinal
+			    AND tre.call_index = tc.call_index
+			    AND tre.source = 'tool_execution'
+			    AND tre.status IN ('completed', 'errored')
+			    AND NULLIF(tre.timestamp, '') IS NOT NULL
+			  ORDER BY tre.event_index DESC
+			  LIMIT 1
+			) AS exec_completed`
+}
+
+// analyticsToolsDurationExpr turns the per-call duration inputs
+// (sub_started, sub_end, is_sub, exec_started, exec_completed — column
+// aliases of the derived table this is evaluated over) into a SQLite
+// milliseconds expression. julianday(NULL) yields NULL, so the WHEN
+// guards double as the null and monotonicity checks.
+func analyticsToolsDurationExpr() string {
+	return `CASE
+			  WHEN is_sub = 1 AND sub_started IS NOT NULL THEN
+			    CAST(ROUND(
+			      (julianday(sub_end) - julianday(sub_started)) *
+			      86400000
+			    ) AS INTEGER)
+			  WHEN julianday(exec_completed) >=
+			       julianday(exec_started) THEN
+			    CAST(ROUND(
+			      (julianday(exec_completed) -
+			       julianday(exec_started)) * 86400000
+			    ) AS INTEGER)
+			  ELSE NULL
+			END`
+}
+
 func analyticsToolsQuery(
 	placeholders string,
 	modelPred string,
 	windowPred string,
 	includeMessageMeta bool,
 ) string {
-	query := `SELECT tc.session_id, tc.category,
-			TRIM(COALESCE(tc.tool_name, '')), COUNT(*)`
+	query := `SELECT sid, category, tool_name, COUNT(*),
+			COALESCE(SUM(` + analyticsToolsDurationExpr() + `), 0)`
 	if includeMessageMeta {
-		query += `, MAX(COALESCE(m.timestamp, ''))`
+		query += `, MAX(COALESCE(ts, ''))`
 	}
 	query += `
-		FROM tool_calls tc`
-	if includeMessageMeta {
-		query += `
-		LEFT JOIN messages m
-			ON m.session_id = tc.session_id AND m.id = tc.message_id`
-	}
-	query += `
-		WHERE tc.session_id IN ` + placeholders
+		FROM (
+		  SELECT
+		    tc.session_id AS sid,
+		    tc.category AS category,
+		    TRIM(COALESCE(tc.tool_name, '')) AS tool_name,
+		    COALESCE(m.timestamp, '') AS ts,
+		    s_sub.started_at AS sub_started,` +
+		analyticsToolsPerCallExprs("?") + `
+		  FROM tool_calls tc
+		  LEFT JOIN messages m
+		    ON m.session_id = tc.session_id AND m.id = tc.message_id
+		  LEFT JOIN sessions s_sub
+		    ON s_sub.id = tc.subagent_session_id
+		  WHERE tc.session_id IN ` + placeholders
 	if modelPred != "" {
 		query += `
-			AND ` + modelPred
+		    AND ` + modelPred
 	}
 	if windowPred != "" {
 		query += ` AND ` + windowPred
 	}
 	query += `
-		GROUP BY tc.session_id, tc.category,
-			TRIM(COALESCE(tc.tool_name, ''))`
+		)
+		GROUP BY sid, category, tool_name`
 	if includeMessageMeta {
-		query += `, ` + sqliteAnalyticsMinuteKey()
+		query += `, COALESCE(strftime('%Y-%m-%dT%H:%M', ts), ts, '')`
 	}
 	return query
 }
@@ -3187,6 +3267,12 @@ func (db *DB) GetAnalyticsTools(
 			modelPred, modelArgs := sqliteAnalyticsCSVPredicate(
 				"m.model", f.Model,
 			)
+			// The now parameter feeds sub_end in the SELECT list,
+			// so it precedes the WHERE-clause placeholders.
+			chunkArgs = append(
+				[]any{time.Now().UTC().Format(time.RFC3339)},
+				chunkArgs...,
+			)
 			chunkArgs = append(chunkArgs, modelArgs...)
 			from, to := f.messageWindowBoundsUTC()
 			windowPred, windowArgs := analyticsMessageWindowPred("m.timestamp", from, to)
@@ -3205,8 +3291,9 @@ func (db *DB) GetAnalyticsTools(
 			for rows.Next() {
 				var sid, cat, toolName, ts string
 				var count int
+				var dur int64
 				if err := rows.Scan(
-					&sid, &cat, &toolName, &count, &ts,
+					&sid, &cat, &toolName, &count, &dur, &ts,
 				); err != nil {
 					return fmt.Errorf(
 						"scanning tool_call: %w", err,
@@ -3223,12 +3310,13 @@ func (db *DB) GetAnalyticsTools(
 					continue
 				}
 				toolRows = append(toolRows, ToolAnalyticsRow{
-					SessionID: sid,
-					Category:  cat,
-					ToolName:  toolName,
-					Agent:     info.agent,
-					Count:     count,
-					Date:      date,
+					SessionID:  sid,
+					Category:   cat,
+					ToolName:   toolName,
+					Agent:      info.agent,
+					Count:      count,
+					DurationMs: dur,
+					Date:       date,
 				})
 			}
 			return rows.Err()
@@ -3242,6 +3330,216 @@ func (db *DB) GetAnalyticsTools(
 	}
 
 	return BuildToolsAnalytics(toolRows), nil
+}
+
+// analyticsToolCallsQuery returns the per-call rows backing the
+// per-tool drill-down. The derived table carries the same per-call
+// duration inputs as analyticsToolsQuery; the outer select resolves
+// them into one milliseconds value per call.
+func analyticsToolCallsQuery(
+	placeholders, modelPred, toolPred string,
+) string {
+	query := `SELECT sid, category, tool_name, tool_use_id, skill_name,
+			subagent_session_id, input_json, ts, ordinal,
+			CASE
+			  WHEN is_sub = 1 AND sub_started IS NOT NULL THEN
+			    CAST(ROUND(
+			      (julianday(sub_end) - julianday(sub_started)) *
+			      86400000
+			    ) AS INTEGER)
+			  WHEN julianday(exec_completed) >=
+			       julianday(exec_started) THEN
+			    CAST(ROUND(
+			      (julianday(exec_completed) -
+			       julianday(exec_started)) * 86400000
+			    ) AS INTEGER)
+			  ELSE NULL
+			END
+		FROM (
+		  SELECT
+		    tc.session_id AS sid,
+		    tc.category AS category,
+		    TRIM(COALESCE(tc.tool_name, '')) AS tool_name,
+		    tc.tool_use_id AS tool_use_id,
+		    tc.skill_name AS skill_name,
+		    tc.subagent_session_id AS subagent_session_id,
+		    COALESCE(tc.input_json, '') AS input_json,
+		    COALESCE(m.timestamp, '') AS ts,
+		    m.ordinal AS ordinal,
+		    tc.call_index AS call_index,
+		    s_sub.started_at AS sub_started,` +
+		analyticsToolsPerCallExprs("?") + `
+		  FROM tool_calls tc
+		  LEFT JOIN messages m
+		    ON m.session_id = tc.session_id AND m.id = tc.message_id
+		  LEFT JOIN sessions s_sub
+		    ON s_sub.id = tc.subagent_session_id
+		  WHERE tc.session_id IN ` + placeholders + `
+		    AND ` + toolPred
+	if modelPred != "" {
+		query += `
+		    AND ` + modelPred
+	}
+	query += `
+		)
+		ORDER BY sid, ordinal, call_index`
+	return query
+}
+
+// GetAnalyticsToolCalls returns every call of one tool across the
+// filtered sessions, grouped per session with per-call durations.
+// category is optional; when empty every category of the tool matches.
+// The same AnalyticsFilter semantics as GetAnalyticsTools apply, so the
+// drill-down totals agree with the tool usage card.
+func (db *DB) GetAnalyticsToolCalls(
+	ctx context.Context, f AnalyticsFilter,
+	toolName, category string, limit int,
+) (ToolCallsResponse, error) {
+	trimmed := strings.TrimSpace(toolName)
+	resp := ToolCallsResponse{
+		ToolName: trimmed,
+		Category: category,
+		Sessions: []ToolCallSessionGroup{},
+	}
+	if trimmed == "" {
+		return resp, nil
+	}
+
+	dateCol := "COALESCE(NULLIF(started_at, ''), created_at)"
+	where, args := f.buildWhereWithoutDate()
+	sessQ := `SELECT id, ` + dateCol + `, agent, project,
+			COALESCE(display_name, session_name), first_message
+		FROM sessions WHERE ` + where
+
+	sessRows, err := db.getReader().QueryContext(ctx, sessQ, args...)
+	if err != nil {
+		return ToolCallsResponse{},
+			fmt.Errorf("querying tool call sessions: %w", err)
+	}
+	defer sessRows.Close()
+
+	meta := make(map[string]ToolCallSessionMeta)
+	var sessionIDs []string
+	for sessRows.Next() {
+		var id, ts, agent, project string
+		var displayName, firstMessage sql.NullString
+		if err := sessRows.Scan(
+			&id, &ts, &agent, &project, &displayName, &firstMessage,
+		); err != nil {
+			return ToolCallsResponse{},
+				fmt.Errorf("scanning tool call session: %w", err)
+		}
+		m := ToolCallSessionMeta{
+			Project:   project,
+			Agent:     agent,
+			StartedAt: ts,
+		}
+		if displayName.Valid {
+			v := displayName.String
+			m.DisplayName = &v
+		}
+		if firstMessage.Valid {
+			v := firstMessage.String
+			m.FirstMessage = &v
+		}
+		meta[id] = m
+		sessionIDs = append(sessionIDs, id)
+	}
+	if err := sessRows.Err(); err != nil {
+		return ToolCallsResponse{},
+			fmt.Errorf("iterating tool call sessions: %w", err)
+	}
+	if len(sessionIDs) == 0 {
+		return resp, nil
+	}
+
+	var callRows []ToolCallTimingRow
+	err = queryChunked(sessionIDs,
+		func(chunk []string) error {
+			ph, chunkArgs := inPlaceholders(chunk)
+			modelPred, modelArgs := sqliteAnalyticsCSVPredicate(
+				"m.model", f.Model,
+			)
+			// See GetAnalyticsTools: sub_end's now parameter
+			// precedes the WHERE-clause placeholders.
+			chunkArgs = append(
+				[]any{time.Now().UTC().Format(time.RFC3339)},
+				chunkArgs...,
+			)
+			toolPred := `TRIM(COALESCE(tc.tool_name, '')) = ?`
+			chunkArgs = append(chunkArgs, trimmed)
+			if category != "" {
+				toolPred += ` AND tc.category = ?`
+				chunkArgs = append(chunkArgs, category)
+			}
+			chunkArgs = append(chunkArgs, modelArgs...)
+			q := analyticsToolCallsQuery(ph, modelPred, toolPred)
+			rows, qErr := db.getReader().QueryContext(
+				ctx, q, chunkArgs...,
+			)
+			if qErr != nil {
+				return fmt.Errorf(
+					"querying tool calls: %w", qErr,
+				)
+			}
+			defer rows.Close()
+			for rows.Next() {
+				var sid, cat, name, ts string
+				var toolUseID, inputJSON sql.NullString
+				var skill, sub sql.NullString
+				var ordinal int
+				var dur sql.NullInt64
+				if err := rows.Scan(
+					&sid, &cat, &name, &toolUseID, &skill,
+					&sub, &inputJSON, &ts, &ordinal, &dur,
+				); err != nil {
+					return fmt.Errorf(
+						"scanning tool call: %w", err,
+					)
+				}
+				info, ok := meta[sid]
+				if !ok {
+					continue
+				}
+				usedTS, _, keep := f.ResolveSkillRowTime(
+					ts, info.StartedAt,
+				)
+				if !keep {
+					continue
+				}
+				row := ToolCallTimingRow{
+					SessionID:      sid,
+					Category:       cat,
+					ToolName:       name,
+					InputJSON:      inputJSON.String,
+					Timestamp:      usedTS,
+					MessageOrdinal: ordinal,
+				}
+				if toolUseID.Valid {
+					row.ToolUseID = toolUseID.String
+				}
+				if skill.Valid {
+					v := skill.String
+					row.SkillName = &v
+				}
+				if sub.Valid {
+					v := sub.String
+					row.SubagentSessionID = &v
+				}
+				if dur.Valid {
+					v := dur.Int64
+					row.DurationMs = &v
+				}
+				callRows = append(callRows, row)
+			}
+			return rows.Err()
+		})
+	if err != nil {
+		return ToolCallsResponse{}, err
+	}
+
+	return BuildAnalyticsToolCalls(trimmed, category, meta, callRows, limit),
+		nil
 }
 
 // ResolveSkillRowTime resolves the timestamp for a single skill call and

@@ -164,6 +164,9 @@ export interface ToolUsageAnalysis {
   tool_name: string;
   category: string;
   call_count: number;
+  /** Sum of measurable per-call durations in milliseconds. Calls
+   *  without a measurable duration contribute count but no time. */
+  total_duration_ms: number;
   session_count: number;
   pct: number;
 }
@@ -179,6 +182,42 @@ export interface ToolsAnalyticsResponse {
   by_agent: ToolAgentBreakdown[];
   by_tool: ToolUsageAnalysis[];
   trend: ToolTrendEntry[];
+}
+
+/** One call in the per-tool drill-down; matches db.ToolCallTiming. */
+export interface ToolCallTiming {
+  tool_use_id: string;
+  category: string;
+  skill_name?: string;
+  subagent_session_id?: string;
+  duration_ms: number | null;
+  started_at: string;
+  message_ordinal: number;
+  input_preview: string;
+}
+
+/** All matching calls of one session; matches db.ToolCallSessionGroup. */
+export interface ToolCallSessionGroup {
+  session_id: string;
+  project: string;
+  agent: string;
+  started_at: string;
+  display_name?: string;
+  first_message?: string;
+  call_count: number;
+  total_duration_ms: number;
+  calls: ToolCallTiming[];
+}
+
+/** Per-tool drill-down payload; matches db.ToolCallsResponse. */
+export interface ToolCallsResponse {
+  tool_name: string;
+  category: string;
+  total_calls: number;
+  total_duration_ms: number;
+  session_count: number;
+  truncated: boolean;
+  sessions: ToolCallSessionGroup[];
 }
 
 export interface SkillAgentBreakdown {

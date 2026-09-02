@@ -7,6 +7,27 @@ import { analytics } from "../../stores/analytics.svelte.js";
 // @ts-ignore
 import { AnalyticsService } from "../../api/generated/index.js";
 
+// jsdom has no layout, so the real TanStack virtualizer would render a
+// zero-height window. Render every row instead.
+vi.mock("../../virtual/createVirtualizer.svelte.js", () => ({
+  createVirtualizer: (optsFn: () => any) => ({
+    instance: {
+      getVirtualItems: () => {
+        const opts = optsFn();
+        return Array.from({ length: opts.count }, (_, index) => ({
+          index,
+          key: opts.getItemKey(index),
+          start: index * 24,
+          end: (index + 1) * 24,
+          size: 24,
+        }));
+      },
+      getTotalSize: () => optsFn().count * 24,
+      measureElement: () => {},
+    },
+  }),
+}));
+
 function requireNonNull<T>(
   value: T | null | undefined,
   label: string,

@@ -1,9 +1,12 @@
 <!-- ABOUTME: Per-tool drill-down modal — every matching call across all
      sessions, grouped per session with per-call durations. Opened from
      the Tool Usage card's tool names. Mirrors the analysis sidebar's
-     calls list look via the shared CallRow component. -->
+     calls list look via the shared CallRow component. The session/call
+     list is fully virtualized (one row per header or call) so large
+     result sets render only the visible window. -->
 <script lang="ts">
   import { onDestroy } from "svelte";
+  import type { Virtualizer } from "@tanstack/virtual-core";
   import { Modal, Spinner } from "@kenn-io/kit-ui";
   import { m } from "../../i18n/index.js";
   import { analytics } from "../../stores/analytics.svelte.js";
@@ -12,15 +15,15 @@
   import { AnalyticsService } from "../../api/generated/index.js";
   import { callGenerated, isAbortError } from "../../api/runtime.js";
   import { formatDuration } from "../../utils/duration.js";
-  import { formatNumber } from "../../utils/format.js";
+  import { formatNumber, truncate } from "../../utils/format.js";
   import { normalizeMessagePreview } from "../../utils/messages.js";
-  import { truncate } from "../../utils/format.js";
   import type {
     ToolCallSessionGroup,
     ToolCallTiming,
     ToolCallsResponse,
   } from "../../api/types/analytics.js";
   import type { CallTiming } from "../../api/types/timing.js";
+  import { createVirtualizer } from "../../virtual/createVirtualizer.svelte.js";
   import CallRow from "../content/CallRow.svelte";
 
   interface Props {
@@ -75,7 +78,7 @@
   // Bar widths scale against the slowest call in the drill-down so
   // call-vs-call comparisons stay legible, like the per-session calls
   // list in the analysis sidebar.
-  function maxCallMs(): number {
+  let maxCallMs = $derived.by(() => {
     let max = 0;
     for (const g of data?.sessions ?? []) {
       for (const call of g.calls) {
@@ -85,22 +88,94 @@
       }
     }
     return max;
-  }
+  });
 
   /** Calls actually listed — the server caps the list, totals don't. */
-  function shownCallCount(): number {
+  let shownCallCount = $derived.by(() => {
     let total = 0;
     for (const g of data?.sessions ?? []) {
       total += g.calls.length;
     }
     return total;
+  });
+
+  // Flat virtualizer rows: one per session header or call, so a
+   // result with thousands of entries only renders the visible window.
+  type DrilldownRow =
+    | {
+        kind: "header";
+        key: string;
+        group: ToolCallSessionGroup;
+        groupEnd: boolean;
+      }
+    | {
+        kind: "call";
+        key: string;
+        group: ToolCallSessionGroup;
+        call: ToolCallTiming;
+        groupEnd: boolean;
+      };
+
+  let rows = $derived.by(() => {
+    const out: DrilldownRow[] = [];
+    for (const g of data?.sessions ?? []) {
+      out.push({
+        kind: "header",
+        key: `h-${g.session_id}`,
+        group: g,
+        groupEnd: g.calls.length === 0,
+      });
+      for (let i = 0; i < g.calls.length; i++) {
+        out.push({
+          kind: "call",
+          key: `c-${g.session_id}-${i}`,
+          group: g,
+          call: g.calls[i]!,
+          groupEnd: i === g.calls.length - 1,
+        });
+      }
+    }
+    return out;
+  });
+
+  let groupsEl = $state<HTMLElement | undefined>(undefined);
+
+  const virtualizer = createVirtualizer(() => {
+    return {
+      count: rows.length,
+      getScrollElement: () => groupsEl ?? null,
+      estimateSize: (index) =>
+        rows[index]?.kind === "header" ? 38 : 24,
+      overscan: 8,
+      measureCacheKey: data,
+      getItemKey: (index: number) => rows[index]?.key ?? `idx-${index}`,
+    };
+  });
+
+  /** Svelte action: measure element for variable-height virtualizer */
+  function measureElement(
+    node: HTMLElement,
+    virt: Virtualizer<HTMLElement, HTMLElement> | undefined,
+  ) {
+    virt?.measureElement(node);
+    return {
+      update(nextVirt: Virtualizer<HTMLElement, HTMLElement> | undefined) {
+        nextVirt?.measureElement(node);
+      },
+      destroy() {
+        // Cleanup handled by virtualizer
+      },
+    };
   }
 
-  function callBarPct(call: ToolCallTiming, maxMs: number): number {
-    if (call.duration_ms == null || call.duration_ms <= 0 || maxMs <= 0) {
+  function callBarPct(call: ToolCallTiming): number {
+    if (call.duration_ms == null || call.duration_ms <= 0 || maxCallMs <= 0) {
       return 0;
     }
-    return Math.min(100, Math.max((call.duration_ms / maxMs) * 100, 4));
+    return Math.min(
+      100,
+      Math.max((call.duration_ms / maxCallMs) * 100, 4),
+    );
   }
 
   function toCallTiming(call: ToolCallTiming): CallTiming {
@@ -171,8 +246,8 @@
     {#if data.truncated}
       <div class="truncated">
         {m.analytics_tool_calls_truncated({
-          count: shownCallCount(),
-          countLabel: formatNumber(shownCallCount()),
+          count: shownCallCount,
+          countLabel: formatNumber(shownCallCount),
           totalCount: data.total_calls,
           totalCountLabel: formatNumber(data.total_calls),
         })}
@@ -192,38 +267,56 @@
   {:else if !data || data.sessions.length === 0}
     <div class="state">{m.analytics_tool_calls_empty()}</div>
   {:else}
-    {@const maxMs = maxCallMs()}
-    <div class="groups">
-      {#each data.sessions as g (g.session_id)}
-        <section class="group">
-          <button
-            type="button"
-            class="group-header"
-            title={m.analytics_tool_calls_open_session()}
-            onclick={() => openSession(g)}
-          >
-            <span class="g-label">{truncate(sessionLabel(g), 48)}</span>
-            <span class="g-project">{g.project}</span>
-            <span class="g-meta">
-              {m.analytics_tool_calls_call_count({
-                count: g.call_count,
-                countLabel: formatNumber(g.call_count),
-              })}
-            </span>
-            <span class="g-dur">{formatDuration(g.total_duration_ms)}</span>
-          </button>
-          <div class="g-calls">
-            {#each g.calls as call (call.tool_use_id + call.message_ordinal)}
-              <CallRow
-                call={toCallTiming(call)}
-                barWidthPct={callBarPct(call, maxMs)}
-                expandable={false}
-                onClick={() => openCall(g, call)}
-              />
-            {/each}
-          </div>
-        </section>
-      {/each}
+    <div class="groups" bind:this={groupsEl}>
+      <div
+        class="groups-inner"
+        style="height: {virtualizer.instance?.getTotalSize() ?? 0}px;"
+      >
+        {#each virtualizer.instance?.getVirtualItems() ?? [] as row (row.key)}
+          {@const item = rows[row.index]}
+          {#if item}
+            <div
+              class="vrow"
+              data-index={row.index}
+              style="transform: translateY({row.start}px);"
+              use:measureElement={virtualizer.instance}
+            >
+              {#if item.kind === "header"}
+                <button
+                  type="button"
+                  class="group-header"
+                  class:group-end={item.groupEnd}
+                  title={m.analytics_tool_calls_open_session()}
+                  onclick={() => openSession(item.group)}
+                >
+                  <span class="g-label">
+                    {truncate(sessionLabel(item.group), 48)}
+                  </span>
+                  <span class="g-project">{item.group.project}</span>
+                  <span class="g-meta">
+                    {m.analytics_tool_calls_call_count({
+                      count: item.group.call_count,
+                      countLabel: formatNumber(item.group.call_count),
+                    })}
+                  </span>
+                  <span class="g-dur">
+                    {formatDuration(item.group.total_duration_ms)}
+                  </span>
+                </button>
+              {:else}
+                <div class="call-slot" class:group-end={item.groupEnd}>
+                  <CallRow
+                    call={toCallTiming(item.call)}
+                    barWidthPct={callBarPct(item.call)}
+                    expandable={false}
+                    onClick={() => openCall(item.group, item.call)}
+                  />
+                </div>
+              {/if}
+            </div>
+          {/if}
+        {/each}
+      </div>
     </div>
   {/if}
 </Modal>
@@ -267,21 +360,23 @@
     cursor: pointer;
   }
   .groups {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-    max-height: min(60vh, 520px);
+    position: relative;
     overflow-y: auto;
+    /* Fixed height, not max-height: the virtualizer measures this
+     * element as its viewport, and an empty max-height box collapses
+     * to 0px, which would render zero rows (deadlock). */
+    height: min(60vh, 520px);
     margin-top: 8px;
-    padding-right: 2px;
   }
-  .group {
-    /* Flex item of .groups: never shrink below content height,
-     * otherwise every group collapses when the list overflows. */
-    flex-shrink: 0;
-    border: 1px solid var(--border-muted);
-    border-radius: var(--radius-sm);
-    overflow: hidden;
+  .groups-inner {
+    position: relative;
+    width: 100%;
+  }
+  .vrow {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
   }
   .group-header {
     display: grid;
@@ -290,11 +385,18 @@
     gap: 10px;
     width: 100%;
     padding: 6px 8px;
+    margin-top: 8px;
     background: var(--bg-inset);
-    border: 0;
+    border: 1px solid var(--border-muted);
+    border-bottom: 0;
+    border-radius: var(--radius-sm) var(--radius-sm) 0 0;
     text-align: left;
     cursor: pointer;
     transition: background 0.1s;
+  }
+  .group-header.group-end {
+    border-bottom: 1px solid var(--border-muted);
+    border-radius: var(--radius-sm);
   }
   .group-header:hover {
     background: var(--bg-surface-hover);
@@ -332,9 +434,13 @@
     text-align: right;
     white-space: nowrap;
   }
-  .g-calls {
-    display: flex;
-    flex-direction: column;
-    padding: 2px 4px 4px;
+  .call-slot {
+    border-left: 1px solid var(--border-muted);
+    border-right: 1px solid var(--border-muted);
+  }
+  .call-slot.group-end {
+    border-bottom: 1px solid var(--border-muted);
+    border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+    padding-bottom: 3px;
   }
 </style>

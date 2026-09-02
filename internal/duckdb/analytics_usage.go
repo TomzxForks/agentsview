@@ -1831,6 +1831,13 @@ func (s *Store) GetAnalyticsTools(
 				           AND exec_started IS NOT NULL
 				           AND exec_completed >= exec_started THEN
 				        date_diff('millisecond', exec_started, exec_completed)
+				      WHEN (NOT is_sub) AND sibling_count = 1 THEN
+				        CASE
+				          WHEN turn_end IS NOT NULL AND ts IS NOT NULL
+				               AND turn_end >= ts THEN
+				            date_diff('millisecond', ts, turn_end)
+				          ELSE NULL
+				        END
 				      ELSE NULL
 				    END), 0), MAX(ts)
 				FROM (
@@ -1842,6 +1849,23 @@ func (s *Store) GetAnalyticsTools(
 				    s_sub.started_at AS sub_started,
 				    COALESCE(s_sub.ended_at, CAST(? AS TIMESTAMP)) AS sub_end,
 				    (tc.subagent_session_id IS NOT NULL) AS is_sub,
+				    (
+				      SELECT COUNT(*)
+				      FROM tool_calls tc2
+				      WHERE tc2.session_id = tc.session_id
+				        AND tc2.message_id = tc.message_id
+				    ) AS sibling_count,
+				    COALESCE(
+				      (
+				        SELECT m2.timestamp
+				        FROM messages m2
+				        WHERE m2.session_id = tc.session_id
+				          AND m2.ordinal > m.ordinal
+				        ORDER BY m2.ordinal ASC
+				        LIMIT 1
+				      ),
+				      s_own.ended_at
+				    ) AS turn_end,
 				    (
 				      SELECT tre.timestamp
 				      FROM tool_result_events tre
@@ -1872,6 +1896,8 @@ func (s *Store) GetAnalyticsTools(
 				    AND m.id = tc.message_id
 				  LEFT JOIN sessions s_sub
 				    ON s_sub.id = tc.subagent_session_id
+				  LEFT JOIN sessions s_own
+				    ON s_own.id = tc.session_id
 				  WHERE tc.session_id IN ` + ph
 		if modelPred != "" {
 			query += `
@@ -1984,6 +2010,13 @@ func (s *Store) GetAnalyticsToolCalls(
 				       AND exec_started IS NOT NULL
 				       AND exec_completed >= exec_started THEN
 				    date_diff('millisecond', exec_started, exec_completed)
+				  WHEN (NOT is_sub) AND sibling_count = 1 THEN
+				    CASE
+				      WHEN turn_end IS NOT NULL AND ts IS NOT NULL
+				           AND turn_end >= ts THEN
+				        date_diff('millisecond', ts, turn_end)
+				      ELSE NULL
+				    END
 				  ELSE NULL
 				END
 				FROM (
@@ -2001,6 +2034,23 @@ func (s *Store) GetAnalyticsToolCalls(
 				    s_sub.started_at AS sub_started,
 				    COALESCE(s_sub.ended_at, CAST(? AS TIMESTAMP)) AS sub_end,
 				    (tc.subagent_session_id IS NOT NULL) AS is_sub,
+				    (
+				      SELECT COUNT(*)
+				      FROM tool_calls tc2
+				      WHERE tc2.session_id = tc.session_id
+				        AND tc2.message_id = tc.message_id
+				    ) AS sibling_count,
+				    COALESCE(
+				      (
+				        SELECT m2.timestamp
+				        FROM messages m2
+				        WHERE m2.session_id = tc.session_id
+				          AND m2.ordinal > m.ordinal
+				        ORDER BY m2.ordinal ASC
+				        LIMIT 1
+				      ),
+				      s_own.ended_at
+				    ) AS turn_end,
 				    (
 				      SELECT tre.timestamp
 				      FROM tool_result_events tre
@@ -2031,6 +2081,8 @@ func (s *Store) GetAnalyticsToolCalls(
 				    AND m.id = tc.message_id
 				  LEFT JOIN sessions s_sub
 				    ON s_sub.id = tc.subagent_session_id
+				  LEFT JOIN sessions s_own
+				    ON s_own.id = tc.session_id
 				  WHERE tc.session_id IN ` + ph + `
 				    AND ` + toolPred
 		if modelPred != "" {

@@ -3078,8 +3078,11 @@ func skillProjectBreakdowns(
 // scalar subqueries mirror GetSessionTiming's per-call duration rules:
 // sub-agent calls measure the child session's wall time (falling back
 // to the tool_execution events when the child has no start timestamp),
-// other calls measure started -> completed/errored event time and drop
-// non-monotonic pairs.
+// other calls measure started -> completed/errored event time, and
+// solo calls with no event coverage inherit their turn's duration
+// (next message timestamp, else session end) exactly like the timing
+// view's AssembleTiming. sibling_count must count every call of the
+// turn, unfiltered, so parallel calls never inherit.
 func analyticsToolsPerCallExprs(nowParam string) string {
 	return `
 			COALESCE(s_sub.ended_at, ` + nowParam + `) AS sub_end,
@@ -3088,6 +3091,23 @@ func analyticsToolsPerCallExprs(nowParam string) string {
 			       AND s_sub.started_at IS NOT NULL THEN 1
 			  ELSE 0
 			END AS is_sub,
+			(
+			  SELECT COUNT(*)
+			  FROM tool_calls tc2
+			  WHERE tc2.session_id = tc.session_id
+			    AND tc2.message_id = tc.message_id
+			) AS sibling_count,
+			COALESCE(
+			  (
+			    SELECT m2.timestamp
+			    FROM messages m2
+			    WHERE m2.session_id = tc.session_id
+			      AND m2.ordinal > m.ordinal
+			    ORDER BY m2.ordinal ASC
+			    LIMIT 1
+			  ),
+			  s_own.ended_at
+			) AS turn_end,
 			(
 			  SELECT tre.timestamp
 			  FROM tool_result_events tre
@@ -3115,10 +3135,11 @@ func analyticsToolsPerCallExprs(nowParam string) string {
 }
 
 // analyticsToolsDurationExpr turns the per-call duration inputs
-// (sub_started, sub_end, is_sub, exec_started, exec_completed — column
-// aliases of the derived table this is evaluated over) into a SQLite
-// milliseconds expression. julianday(NULL) yields NULL, so the WHEN
-// guards double as the null and monotonicity checks.
+// (sub_started, sub_end, is_sub, sibling_count, turn_end,
+// exec_started, exec_completed — column aliases of the derived table
+// this is evaluated over, plus ts) into a SQLite milliseconds
+// expression. julianday(NULL) yields NULL, so the WHEN guards double
+// as the null and monotonicity checks.
 func analyticsToolsDurationExpr() string {
 	return `CASE
 			  WHEN is_sub = 1 AND sub_started IS NOT NULL THEN
@@ -3132,8 +3153,31 @@ func analyticsToolsDurationExpr() string {
 			      (julianday(exec_completed) -
 			       julianday(exec_started)) * 86400000
 			    ) AS INTEGER)
+			  WHEN is_sub = 0 AND sibling_count = 1 THEN
+			    CASE
+			      WHEN julianday(turn_end) >= julianday(ts) THEN
+			        CAST(ROUND(
+			          (julianday(turn_end) - julianday(ts)) *
+			          86400000
+			        ) AS INTEGER)
+			      ELSE NULL
+			    END
 			  ELSE NULL
 			END`
+}
+
+// analyticsToolsJoins lists the joins shared by the tools aggregation
+// and per-tool drill-down queries: the owning message (for timestamps
+// and the model filter), the sub-agent session (for its wall time), and
+// the owning session (for the last-turn end fallback).
+func analyticsToolsJoins() string {
+	return `
+		  LEFT JOIN messages m
+		    ON m.session_id = tc.session_id AND m.id = tc.message_id
+		  LEFT JOIN sessions s_sub
+		    ON s_sub.id = tc.subagent_session_id
+		  LEFT JOIN sessions s_own
+		    ON s_own.id = tc.session_id`
 }
 
 func analyticsToolsQuery(
@@ -3156,11 +3200,8 @@ func analyticsToolsQuery(
 		    COALESCE(m.timestamp, '') AS ts,
 		    s_sub.started_at AS sub_started,` +
 		analyticsToolsPerCallExprs("?") + `
-		  FROM tool_calls tc
-		  LEFT JOIN messages m
-		    ON m.session_id = tc.session_id AND m.id = tc.message_id
-		  LEFT JOIN sessions s_sub
-		    ON s_sub.id = tc.subagent_session_id
+		  FROM tool_calls tc` +
+		analyticsToolsJoins() + `
 		  WHERE tc.session_id IN ` + placeholders
 	if modelPred != "" {
 		query += `
@@ -3353,6 +3394,15 @@ func analyticsToolCallsQuery(
 			      (julianday(exec_completed) -
 			       julianday(exec_started)) * 86400000
 			    ) AS INTEGER)
+			  WHEN is_sub = 0 AND sibling_count = 1 THEN
+			    CASE
+			      WHEN julianday(turn_end) >= julianday(ts) THEN
+			        CAST(ROUND(
+			          (julianday(turn_end) - julianday(ts)) *
+			          86400000
+			        ) AS INTEGER)
+			      ELSE NULL
+			    END
 			  ELSE NULL
 			END
 		FROM (
@@ -3369,11 +3419,8 @@ func analyticsToolCallsQuery(
 		    tc.call_index AS call_index,
 		    s_sub.started_at AS sub_started,` +
 		analyticsToolsPerCallExprs("?") + `
-		  FROM tool_calls tc
-		  LEFT JOIN messages m
-		    ON m.session_id = tc.session_id AND m.id = tc.message_id
-		  LEFT JOIN sessions s_sub
-		    ON s_sub.id = tc.subagent_session_id
+		  FROM tool_calls tc` +
+		analyticsToolsJoins() + `
 		  WHERE tc.session_id IN ` + placeholders + `
 		    AND ` + toolPred
 	if modelPred != "" {

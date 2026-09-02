@@ -91,6 +91,28 @@ func TestDuckGetAnalyticsToolCallsAndDurations(t *testing.T) {
 			DataVersion:     1,
 			ReplaceMessages: true,
 		},
+		{
+			// Solo Edit call without event coverage inherits its
+			// turn duration (next message timestamp delta).
+			Session: syncSession(
+				"duck-dur-c", "gamma", "third",
+				"2024-06-03T09:00:00Z", 2,
+			),
+			Messages: []db.Message{
+				syncMessage("duck-dur-c", 0, "assistant",
+					"edit", "2024-06-03T09:00:05Z",
+					db.ToolCall{
+						ToolName: "Edit", Category: "Edit",
+						ToolUseID: "tu_c1",
+						InputJSON: `{"file_path":"d.go"}`,
+					},
+				),
+				syncMessage("duck-dur-c", 1, "user",
+					"done", "2024-06-03T09:00:35Z"),
+			},
+			DataVersion:     1,
+			ReplaceMessages: true,
+		},
 	})
 
 	t.Run("ToolsAggregationSumsDurations", func(t *testing.T) {
@@ -142,6 +164,24 @@ func TestDuckGetAnalyticsToolCallsAndDurations(t *testing.T) {
 		require.NotNil(t, b.Calls[0].DurationMs, "errored call duration")
 		assert.Equal(t, int64(500), *b.Calls[0].DurationMs,
 			"errored call duration")
+	})
+
+	t.Run("SoloCallInheritsTurnDuration", func(t *testing.T) {
+		resp, err := store.GetAnalyticsToolCalls(
+			ctx,
+			db.AnalyticsFilter{
+				From: "2024-06-01", To: "2024-06-03", Timezone: "UTC",
+			},
+			"Edit", "", 0,
+		)
+		require.NoError(t, err, "GetAnalyticsToolCalls")
+		require.Len(t, resp.Sessions, 1, "len(Sessions)")
+		g := resp.Sessions[0]
+		assert.Equal(t, "duck-dur-c", g.SessionID, "session")
+		require.Len(t, g.Calls, 1, "len(calls)")
+		require.NotNil(t, g.Calls[0].DurationMs, "call duration")
+		assert.Equal(t, int64(30_000), *g.Calls[0].DurationMs,
+			"solo call inherits turn duration")
 	})
 
 	t.Run("LimitTruncatesButTotalsCoverAll", func(t *testing.T) {

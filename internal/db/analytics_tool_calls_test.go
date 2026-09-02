@@ -93,6 +93,26 @@ func seedToolDurationFixture(t *testing.T, d *DB) {
 		},
 	}
 	insertMessages(t, d, mc)
+
+	// Solo Edit call without event coverage inherits its turn's
+	// duration (next message timestamp delta), matching the timing
+	// view's AssembleTiming.
+	insertSession(t, d, "dur-c", "gamma", func(s *Session) {
+		s.StartedAt = new("2024-06-03T09:00:00Z")
+		s.EndedAt = new("2024-06-03T09:01:00Z")
+		s.MessageCount = 2
+		s.Agent = "claude"
+	})
+	md := asstMsgAt("dur-c", 0, "[Edit: d.go]", "2024-06-03T09:00:05Z")
+	md.HasToolUse = true
+	md.ToolCalls = []ToolCall{
+		{
+			SessionID: "dur-c", ToolName: "Edit", Category: "Edit",
+			ToolUseID: "tu_c1", InputJSON: `{"file_path":"d.go"}`,
+		},
+	}
+	insertMessages(t, d, md, userMsgAt("dur-c", 1, "done",
+		"2024-06-03T09:00:35Z"))
 }
 
 func TestGetAnalyticsToolsDurations(t *testing.T) {
@@ -121,6 +141,11 @@ func TestGetAnalyticsToolsDurations(t *testing.T) {
 	bash := byTool["Bash"]
 	require.NotZero(t, bash.CallCount, "Bash row present")
 	assert.Equal(t, int64(1000), bash.TotalDurationMs, "Bash duration")
+
+	// Solo call with no event coverage inherits its turn duration.
+	edit := byTool["Edit"]
+	require.NotZero(t, edit.CallCount, "Edit row present")
+	assert.Equal(t, int64(30_000), edit.TotalDurationMs, "Edit duration")
 }
 
 func TestGetAnalyticsToolCalls(t *testing.T) {
@@ -175,6 +200,21 @@ func TestGetAnalyticsToolCalls(t *testing.T) {
 		require.NotNil(t, b.Calls[0].DurationMs, "errored call duration")
 		assert.Equal(t, int64(500), *b.Calls[0].DurationMs,
 			"errored call counts")
+	})
+
+	t.Run("SoloCallInheritsTurnDuration", func(t *testing.T) {
+		resp, err := d.GetAnalyticsToolCalls(
+			ctx, baseFilter(), "Edit", "", 0,
+		)
+		require.NoError(t, err, "GetAnalyticsToolCalls")
+		require.Len(t, resp.Sessions, 1, "len(Sessions)")
+		g := resp.Sessions[0]
+		assert.Equal(t, "dur-c", g.SessionID, "session")
+		assert.Equal(t, int64(30_000), g.TotalDurationMs, "group duration")
+		require.Len(t, g.Calls, 1, "len(calls)")
+		require.NotNil(t, g.Calls[0].DurationMs, "call duration")
+		assert.Equal(t, int64(30_000), *g.Calls[0].DurationMs,
+			"solo call inherits turn duration")
 	})
 
 	t.Run("CategoryFilterNarrows", func(t *testing.T) {

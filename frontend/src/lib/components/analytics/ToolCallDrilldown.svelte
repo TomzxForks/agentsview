@@ -276,6 +276,9 @@
     padding-right: 2px;
   }
   .group {
+    /* Flex item of .groups: never shrink below content height,
+     * otherwise every group collapses when the list overflows. */
+    flex-shrink: 0;
     border: 1px solid var(--border-muted);
     border-radius: var(--radius-sm);
     overflow: hidden;

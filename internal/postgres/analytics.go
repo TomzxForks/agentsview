@@ -2192,9 +2192,27 @@ func (s *Store) GetAnalyticsTools(
 				    tc.category AS category,
 				    TRIM(COALESCE(tc.tool_name, '')) AS tool_name,
 				    m.timestamp AS ts,
+				    m.timestamp AS msg_ts,
 				    s_sub.started_at AS sub_started,
 				    COALESCE(s_sub.ended_at, ` + nowPh + `::timestamptz) AS sub_end,
 				    (tc.subagent_session_id IS NOT NULL) AS is_sub,
+				    (
+				      SELECT COUNT(*)
+				      FROM tool_calls tc2
+				      WHERE tc2.session_id = tc.session_id
+				        AND tc2.message_ordinal = tc.message_ordinal
+				    ) AS sibling_count,
+				    COALESCE(
+				      (
+				        SELECT m2.timestamp
+				        FROM messages m2
+				        WHERE m2.session_id = tc.session_id
+				          AND m2.ordinal > m.ordinal
+				        ORDER BY m2.ordinal ASC
+				        LIMIT 1
+				      ),
+				      s_own.ended_at
+				    ) AS turn_end,
 				    (
 				      SELECT tre.timestamp
 				      FROM tool_result_events tre
@@ -2225,6 +2243,8 @@ func (s *Store) GetAnalyticsTools(
 				    AND m.ordinal = tc.message_ordinal
 				  LEFT JOIN sessions s_sub
 				    ON s_sub.id = tc.subagent_session_id
+				  LEFT JOIN sessions s_own
+				    ON s_own.id = tc.session_id
 				  WHERE ` + strings.Join(preds, " AND ") + `
 				) GROUP BY sid, category, tool_name, date_trunc('minute', ts)`
 			rows, qErr := s.pg.QueryContext(
@@ -2280,9 +2300,11 @@ func (s *Store) GetAnalyticsTools(
 }
 
 // pgToolsDurationExpr turns the per-call duration inputs (sub_started,
-// sub_end, is_sub, exec_started, exec_completed — column aliases of the
-// derived table this is evaluated over) into a PG milliseconds
-// expression, mirroring the per-call rules of session_timing.go.
+// sub_end, is_sub, sibling_count, turn_end, msg_ts, exec_started,
+// exec_completed — column aliases of the derived table this is
+// evaluated over) into a PG milliseconds expression, mirroring the
+// per-call rules of session_timing.go including the solo-call turn
+// inheritance.
 func pgToolsDurationExpr() string {
 	return `CASE
 				  WHEN is_sub AND sub_started IS NOT NULL THEN
@@ -2295,6 +2317,15 @@ func pgToolsDurationExpr() string {
 				    (round(EXTRACT(EPOCH FROM (
 				      exec_completed - exec_started
 				    )) * 1000))::bigint
+				  WHEN (NOT is_sub) AND sibling_count = 1 THEN
+				    CASE
+				      WHEN turn_end IS NOT NULL AND msg_ts IS NOT NULL
+				           AND turn_end >= msg_ts THEN
+				        (round(EXTRACT(EPOCH FROM (
+				          turn_end - msg_ts
+				        )) * 1000))::bigint
+				      ELSE NULL
+				    END
 				  ELSE NULL
 				END`
 }
@@ -2306,6 +2337,23 @@ func pgToolCallsInputColumns(nowPh string) string {
 				    s_sub.started_at AS sub_started,
 				    COALESCE(s_sub.ended_at, ` + nowPh + `::timestamptz) AS sub_end,
 				    (tc.subagent_session_id IS NOT NULL) AS is_sub,
+				    (
+				      SELECT COUNT(*)
+				      FROM tool_calls tc2
+				      WHERE tc2.session_id = tc.session_id
+				        AND tc2.message_ordinal = tc.message_ordinal
+				    ) AS sibling_count,
+				    COALESCE(
+				      (
+				        SELECT m2.timestamp
+				        FROM messages m2
+				        WHERE m2.session_id = tc.session_id
+				          AND m2.ordinal > m.ordinal
+				        ORDER BY m2.ordinal ASC
+				        LIMIT 1
+				      ),
+				      s_own.ended_at
+				    ) AS turn_end,
 				    (
 				      SELECT tre.timestamp
 				      FROM tool_result_events tre
@@ -2435,6 +2483,7 @@ func (s *Store) GetAnalyticsToolCalls(
 				    tc.subagent_session_id AS subagent_session_id,
 				    COALESCE(tc.input_json, '') AS input_json,
 				    ` + msgTSExpr + ` AS ts,
+				    m.timestamp AS msg_ts,
 				    tc.message_ordinal AS ordinal,
 				    tc.call_index AS call_index,` +
 				pgToolCallsInputColumns(nowPh) + `
@@ -2444,6 +2493,8 @@ func (s *Store) GetAnalyticsToolCalls(
 				    AND m.ordinal = tc.message_ordinal
 				  LEFT JOIN sessions s_sub
 				    ON s_sub.id = tc.subagent_session_id
+				  LEFT JOIN sessions s_own
+				    ON s_own.id = tc.session_id
 				  WHERE ` + strings.Join(preds, " AND ") + `
 				) ORDER BY sid, ordinal, call_index`
 			rows, qErr := s.pg.QueryContext(

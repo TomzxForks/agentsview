@@ -8,4 +8,5 @@ export interface DbToolUsageAnalysis {
   pct: number;
   session_count: number;
   tool_name: string;
+  total_duration_ms: number;
 }

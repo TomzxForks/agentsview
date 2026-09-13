@@ -231,7 +231,7 @@ func (s *Server) humaAnalyticsTPS(
 	ctx context.Context,
 	in *AnalyticsFilterInput,
 ) (*jsonOutput[db.TPSResponse], error) {
-	f, err := analyticsFilterFromInput(*in)
+	f, err := s.analyticsFilterFromInput(ctx, *in)
 	if err != nil {
 		return nil, err
 	}
@@ -268,7 +268,7 @@ func (s *Server) humaAnalyticsToolCalls(
 	ctx context.Context,
 	in *analyticsToolCallsInput,
 ) (*jsonOutput[db.ToolCallsResponse], error) {
-	f, err := analyticsFilterFromInput(in.AnalyticsFilterInput)
+	f, err := s.analyticsFilterFromInput(ctx, in.AnalyticsFilterInput)
 	if err != nil {
 		return nil, err
 	}

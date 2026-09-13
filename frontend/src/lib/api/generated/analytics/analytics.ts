@@ -11,6 +11,8 @@ import type {
   DbSignalSessionsResponse,
   DbSignalsAnalyticsResponse,
   DbSkillsAnalyticsResponse,
+  DbTPSResponse,
+  DbToolCallsResponse,
   DbToolsAnalyticsResponse,
   DbTopSessionsResponse,
   DbVelocityResponse,
@@ -23,8 +25,10 @@ import type {
   GetApiV1AnalyticsSignalsParams,
   GetApiV1AnalyticsSkillsParams,
   GetApiV1AnalyticsSummaryParams,
+  GetApiV1AnalyticsToolsCallsParams,
   GetApiV1AnalyticsToolsParams,
   GetApiV1AnalyticsTopSessionsParams,
+  GetApiV1AnalyticsTpsParams,
   GetApiV1AnalyticsVelocityParams,
 } from "../models";
 
@@ -322,6 +326,35 @@ export const getApiV1AnalyticsTools = async (
   });
 };
 
+export const getGetApiV1AnalyticsToolsCallsUrl = (params: GetApiV1AnalyticsToolsCallsParams) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : String(value));
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/v1/analytics/tools/calls?${stringifiedParams}`
+    : `/api/v1/analytics/tools/calls`;
+};
+
+/**
+ * @summary Get per-tool call timings
+ */
+export const getApiV1AnalyticsToolsCalls = async (
+  params: GetApiV1AnalyticsToolsCallsParams,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<DbToolCallsResponse> => {
+  return orvalFetch<DbToolCallsResponse>(getGetApiV1AnalyticsToolsCallsUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
 export const getGetApiV1AnalyticsTopSessionsUrl = (params?: GetApiV1AnalyticsTopSessionsParams) => {
   const normalizedParams = new URLSearchParams();
 
@@ -346,6 +379,35 @@ export const getApiV1AnalyticsTopSessions = async (
   options?: Parameters<typeof orvalFetch>[1],
 ): Promise<DbTopSessionsResponse> => {
   return orvalFetch<DbTopSessionsResponse>(getGetApiV1AnalyticsTopSessionsUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetApiV1AnalyticsTpsUrl = (params?: GetApiV1AnalyticsTpsParams) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : String(value));
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/v1/analytics/tps?${stringifiedParams}`
+    : `/api/v1/analytics/tps`;
+};
+
+/**
+ * @summary Get TPS analytics
+ */
+export const getApiV1AnalyticsTps = async (
+  params?: GetApiV1AnalyticsTpsParams,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<DbTPSResponse> => {
+  return orvalFetch<DbTPSResponse>(getGetApiV1AnalyticsTpsUrl(params), {
     ...options,
     method: "GET",
   });

@@ -5109,6 +5109,12 @@ func TestGetAnalyticsToolsChunksSessionsAtMaxSQLVars(t *testing.T) {
 	modelPred, modelArgs := sqliteAnalyticsCSVPredicate("m.model", f.Model)
 	from, to := f.messageWindowBoundsUTC()
 	pred, windowArgs := analyticsMessageWindowPred("m.timestamp", from, to)
+	// The now parameter feeds sub_end in the SELECT list, so it precedes
+	// the WHERE-clause placeholders.
+	args = append(
+		[]any{time.Now().UTC().Format(time.RFC3339)},
+		args...,
+	)
 	args = append(append(args, modelArgs...), windowArgs...)
 	rows, err := d.getReader().QueryContext(context.Background(), analyticsToolsQuery(ph, modelPred, pred, true), args...)
 	require.NoError(t, err)
@@ -5117,7 +5123,7 @@ func TestGetAnalyticsToolsChunksSessionsAtMaxSQLVars(t *testing.T) {
 	for rows.Next() {
 		var r ToolAnalyticsRow
 		var ts string
-		require.NoError(t, rows.Scan(&r.SessionID, &r.Category, &r.ToolName, &r.Count, &ts))
+		require.NoError(t, rows.Scan(&r.SessionID, &r.Category, &r.ToolName, &r.Count, &r.DurationMs, &ts))
 		r.Agent = defaultAgent
 		r.Date = "2025-06-01"
 		all = append(all, r)

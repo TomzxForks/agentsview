@@ -480,12 +480,26 @@ func assertAnalyticsMessageWindowQuery(t *testing.T, skills bool) {
 	}
 	require.Len(t, state.queries, 2)
 	q := strings.Join(strings.Fields(state.queries[1]), " ")
-	assert.Contains(t, q, "m.model = $3")
-	assert.Contains(t, q, "m.timestamp IS NULL OR (m.timestamp >= $4::timestamptz AND m.timestamp < $5::timestamptz)")
-	assert.Contains(t, q, "date_trunc('minute', m.timestamp)")
-	assert.Contains(t, q, "MAX(m.timestamp)")
-	assert.Contains(t, q, "m.ordinal = tc.message_ordinal")
-	assert.Equal(t, []any{"s1", "s2", "model-a", "2024-05-31T10:00:00Z", "2024-07-01T14:00:00Z"}, state.args[1])
+	if skills {
+		assert.Contains(t, q, "m.model = $3")
+		assert.Contains(t, q, "m.timestamp IS NULL OR (m.timestamp >= $4::timestamptz AND m.timestamp < $5::timestamptz)")
+		assert.Contains(t, q, "date_trunc('minute', m.timestamp)")
+		assert.Contains(t, q, "MAX(m.timestamp)")
+		assert.Contains(t, q, "m.ordinal = tc.message_ordinal")
+		assert.Equal(t, []any{"s1", "s2", "model-a", "2024-05-31T10:00:00Z", "2024-07-01T14:00:00Z"}, state.args[1])
+	} else {
+		// Tools query: the derived table carries a leading now parameter
+		// for sub_end, shifting every later placeholder by one.
+		assert.Contains(t, q, "m.model = $4")
+		assert.Contains(t, q, "m.timestamp IS NULL OR (m.timestamp >= $5::timestamptz AND m.timestamp < $6::timestamptz)")
+		assert.Contains(t, q, "date_trunc('minute', ts)")
+		assert.Contains(t, q, "MAX(ts)")
+		assert.Contains(t, q, "m.ordinal = tc.message_ordinal")
+		require.Len(t, state.args[1], 6)
+		_, nowOK := state.args[1][0].(time.Time)
+		assert.True(t, nowOK, "tools query must lead with the sub_end now parameter")
+		assert.Equal(t, []any{"s1", "s2", "model-a", "2024-05-31T10:00:00Z", "2024-07-01T14:00:00Z"}, state.args[1][1:])
+	}
 	assert.Contains(t, state.queries[0], "wm.session_id = sessions.id")
 	assert.Equal(t, []any{"model-a", "2024-05-31T10:00:00Z", "2024-07-01T14:00:00Z", "2024-05-31T10:00:00Z", "2024-07-01T14:00:00Z"}, state.args[0])
 	t.Log("typed UTC bounds and minute grouping captured; model and window arguments paired")

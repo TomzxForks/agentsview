@@ -4,11 +4,9 @@
   import type {
     SessionTiming,
     CallTiming,
-    TurnTiming,
   } from "../../api/types/timing.js";
   import { formatDuration } from "../../utils/duration.js";
   import { formatNumber } from "../../utils/format.js";
-  import { liveTick } from "../../stores/liveTick.svelte.js";
   import CallRow from "./CallRow.svelte";
   import CallGroup from "./CallGroup.svelte";
 
@@ -37,24 +35,6 @@
   function isLastTurn(idx: number): boolean {
     return idx === timing.turns.length - 1;
   }
-
-  function turnHeaderBarPct(turn: {
-    duration_ms: number | null;
-  }): number {
-    if (turn.duration_ms == null || timing.total_duration_ms <= 0) {
-      return 0;
-    }
-    return Math.min(
-      100,
-      (turn.duration_ms / timing.total_duration_ms) * 100,
-    );
-  }
-
-  function liveElapsedFor(turn: TurnTiming): number {
-    const start = new Date(turn.started_at).getTime();
-    if (Number.isNaN(start)) return 0;
-    return Math.max(0, liveTick.now - start);
-  }
 </script>
 
 <div class="sa-expand">
@@ -73,14 +53,12 @@
     {#each timing.turns as turn, i (turn.message_id)}
       {@const isLive =
         turn.duration_ms == null && isLastTurn(i) && timing.running}
-      {@const liveElapsed = isLive ? liveElapsedFor(turn) : undefined}
       {#if turn.calls.length === 1}
         {@const call = turn.calls[0]!}
         <CallRow
           {call}
           barWidthPct={barScalePct(call)}
           isLive={isLive}
-          liveDurationMs={liveElapsed}
           expandable={false}
           dimmed={categoryFilter !== null &&
             call.category !== categoryFilter}
@@ -88,11 +66,8 @@
       {:else}
         <CallGroup
           calls={turn.calls}
-          groupDurationMs={turn.duration_ms}
           {barScalePct}
-          headerBarPct={turnHeaderBarPct(turn)}
           isLive={isLive}
-          liveDurationMs={liveElapsed}
           expandable={false}
           dimmed={categoryFilter !== null &&
             turn.primary_category !== categoryFilter}

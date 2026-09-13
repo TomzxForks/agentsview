@@ -16,6 +16,8 @@ const mocks = vi.hoisted(() => {
     slowest_call: null,
     by_category: [],
     turns: [],
+    activity: [],
+    activity_totals: { thinking_ms: 0, generation_ms: 0, tool_ms: 0, unattributed_ms: 0 },
     running: false,
   };
 
@@ -88,6 +90,121 @@ describe("SessionVitals", () => {
     cleanup();
     document.body.innerHTML = "";
     vi.unstubAllGlobals();
+  });
+
+  it("renders measured activity and unattributed time and jumps to the prompt", async () => {
+    const timing = timingWithCall();
+    timing.total_duration_ms = 6000;
+    timing.tool_duration_ms = 2000;
+    timing.activity_totals = {
+      thinking_ms: 0,
+      generation_ms: 0,
+      tool_ms: 2000,
+      unattributed_ms: 4000,
+    };
+    timing.activity = [
+      {
+        message_id: 10,
+        ordinal: 4,
+        started_at: "2026-07-14T12:00:00Z",
+        duration_ms: 6000,
+        thinking_ms: 0,
+        generation_ms: 0,
+        tool_ms: 2000,
+        unattributed_ms: 4000,
+        precision: "message_only",
+        running: false,
+      },
+    ];
+    timing.turns[0]!.duration_ms = 5000;
+    timing.turns[0]!.calls[0]!.duration_ms = 2000;
+    timing.turns[0]!.calls.push({
+      tool_use_id: "unknown",
+      tool_name: "Read",
+      category: "Read",
+      duration_ms: null,
+      is_parallel: true,
+      input_preview: "main.go",
+    });
+    timing.tool_call_count = 2;
+    mocks.fetchSessionTiming.mockResolvedValue(timing);
+    component = mount(SessionVitals, {
+      target: document.body,
+      props: { sessionId: "sess-1", session: undefined },
+    });
+    await tick();
+    await tick();
+
+    const row = document.querySelector<HTMLButtonElement>(".activity-row");
+    expect(row?.getAttribute("aria-label")).toBe("Turn 1 · 6.0s");
+    expect(
+      [...row!.querySelectorAll(".activity-track > span")].map((el) => el.getAttribute("title")),
+    ).toEqual([
+      "Thinking · 0ms",
+      "Generation · 0ms",
+      "Tool execution · 2.0s",
+      "Unattributed · 4.0s",
+    ]);
+    expect(
+      parseFloat(row!.querySelector<HTMLElement>('[data-activity-kind="tool"]')!.style.width),
+    ).toBeCloseTo(33.3333);
+    expect(
+      parseFloat(
+        row!.querySelector<HTMLElement>('[data-activity-kind="unattributed"]')!.style.width,
+      ),
+    ).toBeCloseTo(66.6667);
+    expect(document.querySelector(".activity-totals")?.textContent).toContain(
+      "Unattributed · 4.0s",
+    );
+    expect([...document.querySelectorAll(".cd")].map((el) => el.textContent?.trim())).toEqual([
+      "2.0s",
+      "unknown",
+    ]);
+    expect(
+      [...document.querySelectorAll<HTMLElement>(".cbar")].map((el) => el.style.width),
+    ).toEqual(["100%", "0%"]);
+    const scroll = vi.spyOn(ui, "scrollToOrdinal");
+    row!.click();
+    expect(scroll).toHaveBeenCalledWith(4);
+    scroll.mockRestore();
+  });
+
+  it("keeps a running unsupported window fully unattributed", async () => {
+    mocks.fetchSessionTiming.mockResolvedValue({
+      ...mocks.timing,
+      total_duration_ms: 6000,
+      running: true,
+      activity_totals: { thinking_ms: 0, generation_ms: 0, tool_ms: 0, unattributed_ms: 6000 },
+      activity: [
+        {
+          message_id: 1,
+          ordinal: 0,
+          started_at: "2026-07-14T12:00:00Z",
+          duration_ms: 6000,
+          thinking_ms: 0,
+          generation_ms: 0,
+          tool_ms: 0,
+          unattributed_ms: 6000,
+          precision: "message_only",
+          running: true,
+        },
+      ],
+    });
+    component = mount(SessionVitals, {
+      target: document.body,
+      props: { sessionId: "sess-1", session: undefined },
+    });
+    await tick();
+    await tick();
+
+    expect(
+      document.querySelector<HTMLElement>('[data-activity-kind="unattributed"]')?.style.width,
+    ).toBe("100%");
+    expect(document.querySelector<HTMLElement>('[data-activity-kind="tool"]')?.style.width).toBe(
+      "0%",
+    );
+    expect(document.querySelector(".activity-totals")?.textContent).toContain("Thinking · 0ms");
+    expect(document.querySelector(".activity-totals")?.textContent).toContain("Generation · 0ms");
   });
 
   it("has an obvious close control inside the analysis pane", async () => {

@@ -1966,7 +1966,7 @@ func (s *Store) GetAnalyticsToolCalls(
 		return resp, nil
 	}
 
-	sessions, err := s.analyticsSessionsFiltered(ctx, f, false, false)
+	sessions, err := s.analyticsSessionsFiltered(ctx, f, false, false, "", nil)
 	if err != nil {
 		return db.ToolCallsResponse{}, err
 	}

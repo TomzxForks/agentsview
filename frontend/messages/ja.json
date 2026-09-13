@@ -559,14 +559,8 @@
   "analytics_tool_calls_close": "閉じる",
   "analytics_tool_calls_call_count": [
     {
-      "declarations": [
-        "input count",
-        "input countLabel",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "input countLabel", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "{countLabel} 回の呼び出し",
         "countPlural=other": "{countLabel} 回の呼び出し"
@@ -575,14 +569,8 @@
   ],
   "analytics_tool_calls_session_count": [
     {
-      "declarations": [
-        "input count",
-        "input countLabel",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "input countLabel", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "{countLabel} セッション",
         "countPlural=other": "{countLabel} セッション"
@@ -603,9 +591,7 @@
         "input totalCountLabel",
         "local countPlural = count: plural"
       ],
-      "selectors": [
-        "countPlural"
-      ],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "全 {totalCountLabel} 回中 {countLabel} 回を表示",
         "countPlural=other": "全 {totalCountLabel} 回中 {countLabel} 回を表示"

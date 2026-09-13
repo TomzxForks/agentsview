@@ -566,7 +566,13 @@
   "analytics_tool_calls_empty": "没有工具调用记录",
   "analytics_tool_calls_truncated": [
     {
-      "declarations": ["input count", "input countLabel", "input totalCount", "input totalCountLabel", "local countPlural = count: plural"],
+      "declarations": [
+        "input count",
+        "input countLabel",
+        "input totalCount",
+        "input totalCountLabel",
+        "local countPlural = count: plural"
+      ],
       "selectors": ["countPlural"],
       "match": {
         "countPlural=other": "显示 {totalCountLabel} 次调用中的 {countLabel} 次"

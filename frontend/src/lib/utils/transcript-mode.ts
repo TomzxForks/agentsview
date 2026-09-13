@@ -12,9 +12,7 @@ const MID_TURN_SYSTEM_SUBTYPES = new Set(["task_notification", "stop_hook"]);
 
 function isMidTurnSystemMessage(m: Message): boolean {
   return (
-    m.is_system === true &&
-    !!m.source_subtype &&
-    MID_TURN_SYSTEM_SUBTYPES.has(m.source_subtype)
+    m.is_system === true && !!m.source_subtype && MID_TURN_SYSTEM_SUBTYPES.has(m.source_subtype)
   );
 }
 

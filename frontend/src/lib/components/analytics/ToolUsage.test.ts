@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { mount, tick, unmount } from "svelte";
 // @ts-ignore
 import ToolUsage from "./ToolUsage.svelte";
@@ -28,10 +28,7 @@ vi.mock("../../virtual/createVirtualizer.svelte.js", () => ({
   }),
 }));
 
-function requireNonNull<T>(
-  value: T | null | undefined,
-  label: string,
-): T {
+function requireNonNull<T>(value: T | null | undefined, label: string): T {
   if (value == null) throw new Error(`missing ${label}`);
   return value;
 }
@@ -109,46 +106,44 @@ describe("ToolUsage", () => {
   });
 
   it("opens the per-tool call drilldown from a tool name", async () => {
-    const callsSpy = vi
-      .spyOn(AnalyticsService, "getApiV1AnalyticsToolsCalls")
-      .mockResolvedValue({
-        tool_name: "Read",
-        category: "Read",
-        total_calls: 2,
-        total_duration_ms: 5000,
-        session_count: 1,
-        truncated: false,
-        sessions: [
-          {
-            session_id: "s1",
-            project: "alpha",
-            agent: "claude",
-            started_at: "2024-06-01T09:00:00Z",
-            display_name: "Alpha session",
-            first_message: null,
-            call_count: 2,
-            total_duration_ms: 5000,
-            calls: [
-              {
-                tool_use_id: "tu_1",
-                category: "Read",
-                duration_ms: 3000,
-                started_at: "2024-06-01T09:00:01Z",
-                message_ordinal: 1,
-                input_preview: "a.go",
-              },
-              {
-                tool_use_id: "tu_2",
-                category: "Read",
-                duration_ms: 2000,
-                started_at: "2024-06-01T09:00:02Z",
-                message_ordinal: 2,
-                input_preview: "b.go",
-              },
-            ],
-          },
-        ],
-      });
+    const callsSpy = vi.spyOn(AnalyticsService, "getApiV1AnalyticsToolsCalls").mockResolvedValue({
+      tool_name: "Read",
+      category: "Read",
+      total_calls: 2,
+      total_duration_ms: 5000,
+      session_count: 1,
+      truncated: false,
+      sessions: [
+        {
+          session_id: "s1",
+          project: "alpha",
+          agent: "claude",
+          started_at: "2024-06-01T09:00:00Z",
+          display_name: "Alpha session",
+          first_message: null,
+          call_count: 2,
+          total_duration_ms: 5000,
+          calls: [
+            {
+              tool_use_id: "tu_1",
+              category: "Read",
+              duration_ms: 3000,
+              started_at: "2024-06-01T09:00:01Z",
+              message_ordinal: 1,
+              input_preview: "a.go",
+            },
+            {
+              tool_use_id: "tu_2",
+              category: "Read",
+              duration_ms: 2000,
+              started_at: "2024-06-01T09:00:02Z",
+              message_ordinal: 2,
+              input_preview: "b.go",
+            },
+          ],
+        },
+      ],
+    });
     analytics.tools = {
       total_calls: 3,
       by_category: [{ category: "Read", count: 3, pct: 100 }],

@@ -208,7 +208,9 @@ describe("ToolBlock output section", () => {
 
     document.querySelector<HTMLButtonElement>(".output-mode button:nth-child(1)")!.click();
     await tick();
-    expect(document.querySelector(".output-content")?.textContent).toBe(result.replace(/\r\n/g, "\n"));
+    expect(document.querySelector(".output-content")?.textContent).toBe(
+      result.replace(/\r\n/g, "\n"),
+    );
 
     document.querySelector<HTMLButtonElement>('button[aria-label="Copy output"]')!.click();
     await tick();

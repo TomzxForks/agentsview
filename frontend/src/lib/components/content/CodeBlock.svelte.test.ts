@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect, afterEach, vi } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vite-plus/test";
 import { mount, unmount, tick } from "svelte";
 import CodeBlock from "./CodeBlock.svelte";
 import { setLocale } from "../../i18n/index.js";

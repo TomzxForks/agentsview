@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 import { mount, tick, unmount } from "svelte";
 import type { Message } from "../../api/types.js";
 // @ts-ignore

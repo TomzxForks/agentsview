@@ -566,7 +566,13 @@
   "analytics_tool_calls_empty": "沒有工具呼叫紀錄",
   "analytics_tool_calls_truncated": [
     {
-      "declarations": ["input count", "input countLabel", "input totalCount", "input totalCountLabel", "local countPlural = count: plural"],
+      "declarations": [
+        "input count",
+        "input countLabel",
+        "input totalCount",
+        "input totalCountLabel",
+        "local countPlural = count: plural"
+      ],
       "selectors": ["countPlural"],
       "match": {
         "countPlural=other": "顯示 {totalCountLabel} 次呼叫中的 {countLabel} 次"

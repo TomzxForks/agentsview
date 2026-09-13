@@ -2179,8 +2179,6 @@ func (s *Store) GetAnalyticsTools(
 			if pred := pgAnalyticsMessageWindow(f, "m.timestamp", chunkPB); pred != "" {
 				preds = append(preds, pred)
 			}
-			msgTSExpr := `COALESCE(TO_CHAR(MAX(m.timestamp) AT TIME ZONE 'UTC', ` +
-				`'YYYY-MM-DD"T"HH24:MI:SS"Z"'), '')`
 			msgTSExpr := `COALESCE(TO_CHAR(MAX(ts) AT TIME ZONE 'UTC', ` +
 				`'YYYY-MM-DD"T"HH24:MI:SS"Z"'), '')`
 			q := `SELECT sid, category, tool_name, COUNT(*),

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi } from "vite-plus/test";
 import { highlightCodeFences } from "./highlight-fences.js";
 import { applyHighlight } from "./highlight.js";
 

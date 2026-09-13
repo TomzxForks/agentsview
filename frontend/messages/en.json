@@ -584,7 +584,13 @@
   "analytics_tool_calls_empty": "No tool calls found",
   "analytics_tool_calls_truncated": [
     {
-      "declarations": ["input count", "input countLabel", "input totalCount", "input totalCountLabel", "local countPlural = count: plural"],
+      "declarations": [
+        "input count",
+        "input countLabel",
+        "input totalCount",
+        "input totalCountLabel",
+        "local countPlural = count: plural"
+      ],
       "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "Showing {countLabel} of {totalCountLabel} call",

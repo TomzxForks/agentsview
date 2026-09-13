@@ -55,7 +55,5 @@ export function computeMainModelInfo(messages: Message[]): ModelEffort {
 
 export function formatModelEffort(info: ModelEffort): string {
   if (!info.model) return "";
-  return info.reasoningEffort
-    ? `${info.model} ${info.reasoningEffort}`
-    : info.model;
+  return info.reasoningEffort ? `${info.model} ${info.reasoningEffort}` : info.model;
 }

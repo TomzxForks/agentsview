@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { mount, tick, unmount } from "svelte";
 import { analytics } from "../../stores/analytics.svelte.js";
 import { analyticsPageDates } from "../../stores/analyticsPageDates.js";
@@ -74,7 +74,13 @@ afterEach(() => {
 describe("AnalyticsPage initial load", () => {
   async function start() {
     vi.useFakeTimers();
-    vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        observe() {}
+        disconnect() {}
+      },
+    );
     const fetch = vi.spyOn(analytics, "fetchAll").mockResolvedValue();
     vi.spyOn(sessions, "load").mockResolvedValue();
     router.isRootPath = true;
@@ -134,17 +140,20 @@ describe("AnalyticsPage initial load", () => {
     expect(fetch).toHaveBeenCalledTimes(1);
   });
 
-  it.each([true, false])("unmount cancels pending load and reads with loading=%s", async (loading) => {
-    const fetch = await start();
-    const cancel = vi.spyOn(analytics, "cancelInFlightReads");
-    sessions.loading = loading;
-    await flushEffects();
-    await unmount(component!);
-    component = undefined;
-    await vi.advanceTimersByTimeAsync(2000);
-    expect(fetch).not.toHaveBeenCalled();
-    expect(cancel).toHaveBeenCalledTimes(1);
-  });
+  it.each([true, false])(
+    "unmount cancels pending load and reads with loading=%s",
+    async (loading) => {
+      const fetch = await start();
+      const cancel = vi.spyOn(analytics, "cancelInFlightReads");
+      sessions.loading = loading;
+      await flushEffects();
+      await unmount(component!);
+      component = undefined;
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(fetch).not.toHaveBeenCalled();
+      expect(cancel).toHaveBeenCalledTimes(1);
+    },
+  );
 });
 
 describe("AnalyticsPage sidebar controls", () => {

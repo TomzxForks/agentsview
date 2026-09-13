@@ -1,9 +1,5 @@
 import { describe, it, expect } from "vite-plus/test";
-import {
-  computeMainModel,
-  computeMainModelInfo,
-  formatModelEffort,
-} from "./model.js";
+import { computeMainModel, computeMainModelInfo, formatModelEffort } from "./model.js";
 import type { Message } from "../api/types.js";
 
 function msg(role: string, model: string, reasoning_effort?: string): Message {
@@ -120,10 +116,7 @@ describe("computeMainModelInfo", () => {
 
   it("keeps the empty effort bucket as the alphabetical tie winner", () => {
     expect(
-      computeMainModelInfo([
-        msg("assistant", "model", "high"),
-        msg("assistant", "model"),
-      ]),
+      computeMainModelInfo([msg("assistant", "model", "high"), msg("assistant", "model")]),
     ).toEqual({ model: "model", reasoningEffort: "" });
   });
 

@@ -409,5 +409,4 @@ describe("SettingsPage", () => {
 
     unmount(component);
   });
-
 });

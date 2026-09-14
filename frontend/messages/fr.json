@@ -312,7 +312,6 @@
       }
     }
   ],
-  "parallel_group_each_duration": "≤ {duration} chacun",
   "parallel_group_running": "en cours...",
   "subagent_inline_label": "Session de sous-agent",
   "subagent_inline_message_count": [

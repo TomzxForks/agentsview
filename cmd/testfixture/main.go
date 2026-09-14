@@ -453,7 +453,7 @@ func generateContent(role string, idx, total int) string {
 	)
 }
 
-// Only Bash has execution endpoints; Read and the linked Task remain unknown.
+// Bash has execution endpoints, and the linked Task has a closed child session interval.
 func createDurationShowcaseFixture(
 	database *db.DB, start time.Time,
 ) error {
@@ -474,7 +474,7 @@ func createDurationShowcaseFixture(
 	t6 := start.Add(2*time.Minute + 52*time.Second)
 	endParent := start.Add(2*time.Minute + 55*time.Second)
 
-	// Child bounds preserve navigation without proving tool completion.
+	// Child bounds provide a closed completion interval for the linked Task call.
 	subStart := t3
 	subEnd := t4
 	subAgentMessages := buildDurationSubagentMessages(

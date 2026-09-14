@@ -3,6 +3,7 @@
   import { onDestroy } from "svelte";
   import { CopyButton, Tooltip } from "@kenn-io/kit-ui";
   import { sessionTiming } from "../../stores/sessionTiming.svelte.js";
+  import { liveTick } from "../../stores/liveTick.svelte.js";
   import { fetchSessionTiming } from "../../api/timing.js";
   import { isAbortError } from "../../api/runtime.js";
   import { formatDuration } from "../../utils/duration.js";
@@ -172,6 +173,12 @@
       turn.message_id ===
       timing.turns[timing.turns.length - 1]!.message_id
     );
+  }
+
+  function liveElapsedFor(turn: TurnTiming): number {
+    const start = new Date(turn.started_at).getTime();
+    if (Number.isNaN(start)) return 0;
+    return Math.max(0, liveTick.now - start);
   }
 
   function turnForCall(call: CallTiming): TurnTiming | undefined {
@@ -496,6 +503,36 @@
 
         <div class="lane-spacer"></div>
 
+        {#each timing.by_category as cat (cat.category)}
+          <div
+            class="lane-row"
+            class:dimmed={categoryFilter !== null && cat.category !== categoryFilter}
+          >
+            <span class="lane-label">{cat.category}</span>
+            <span class="lane-track">
+              {#each timing.turns.filter((tt) => tt.primary_category === cat.category) as t (t.message_id)}
+                {@const isLive = t.duration_ms == null}
+                <button
+                  class="lane-mark"
+                  class:live={isLive}
+                  style="left: {turnLeftPct(t)}%; width: {turnWidthPct(t)}%; {isLive
+                    ? ''
+                    : `background: ${categoryToken(cat.category)};`}"
+                  title={turnTitle(t)}
+                  onclick={() => scrollToTurn(t)}
+                  type="button"
+                  aria-label={m.session_vitals_jump_to_turn({
+                    category: cat.category,
+                    time: t.started_at,
+                  })}
+                ></button>
+              {/each}
+            </span>
+          </div>
+        {/each}
+
+        <div class="lane-spacer"></div>
+
         <ActivityLane {sessionId} />
 
         <div class="legend">
@@ -568,6 +605,7 @@
                 turn.duration_ms == null &&
                 isLastTurn(turn) &&
                 !!timing.running}
+              {@const liveElapsed = isLive ? liveElapsedFor(turn) : undefined}
               {#if turn.calls.length === 1}
                 {@const call = turn.calls[0]!}
                 <CallRow
@@ -575,6 +613,7 @@
                   barWidthPct={callBarPct(call, timing)}
                   isSlow={isSlowCall(call)}
                   {isLive}
+                  liveDurationMs={liveElapsed}
                   dimmed={categoryFilter !== null &&
                     call.category !== categoryFilter}
                   isSubagentExpanded={!!call.subagent_session_id &&
@@ -601,6 +640,7 @@
                   calls={turn.calls}
                   barScalePct={(c) => callBarPct(c, timing)}
                   {isLive}
+                  liveDurationMs={liveElapsed}
                   isSlow={isSlowCall}
                   dimmed={categoryFilter !== null &&
                     turn.primary_category !== categoryFilter}
@@ -937,6 +977,9 @@
     gap: 8px;
     margin-bottom: 4px;
     transition: opacity 0.18s;
+  }
+  .lane-row.dimmed {
+    opacity: 0.40;
   }
   .lane-label {
     font-family: var(--font-mono);

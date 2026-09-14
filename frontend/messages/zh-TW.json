@@ -302,7 +302,6 @@
       }
     }
   ],
-  "parallel_group_each_duration": "每個 ≤ {duration}",
   "parallel_group_running": "執行中...",
   "subagent_inline_label": "Subagent 對話",
   "subagent_inline_message_count": [

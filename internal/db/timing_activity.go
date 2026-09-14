@@ -35,13 +35,27 @@ func timingTimestamp(value string) (int64, bool) {
 	return t.UnixMilli(), err == nil
 }
 
-func executionInterval(call CallRow) (activityInterval, bool) {
-	start, startErr := time.Parse(time.RFC3339Nano, call.ExecutionStart)
-	end, endErr := time.Parse(time.RFC3339Nano, call.ExecutionEnd)
+func parseClosedInterval(startValue, endValue string) (activityInterval, bool) {
+	start, startErr := time.Parse(time.RFC3339Nano, startValue)
+	end, endErr := time.Parse(time.RFC3339Nano, endValue)
 	if startErr != nil || endErr != nil || end.Before(start) {
 		return activityInterval{}, false
 	}
 	return activityInterval{start.UnixMilli(), end.UnixMilli()}, true
+}
+
+func executionInterval(call CallRow) (activityInterval, bool) {
+	return parseClosedInterval(call.ExecutionStart, call.ExecutionEnd)
+}
+
+func measuredCallInterval(call CallRow) (activityInterval, bool) {
+	if interval, ok := executionInterval(call); ok {
+		return interval, true
+	}
+	if call.SubagentSessionID == nil {
+		return activityInterval{}, false
+	}
+	return parseClosedInterval(call.SubagentStart, call.SubagentEnd)
 }
 
 // assembleTurnActivity shares clipped evidence with call labels and category totals.
@@ -76,7 +90,7 @@ func assembleTurnActivity(out *SessionTiming, sess *Session, turns []TurnRow, ca
 	}
 	intervals := make([]*activityInterval, len(calls))
 	for i, call := range calls {
-		interval, ok := executionInterval(call)
+		interval, ok := measuredCallInterval(call)
 		if !ok {
 			continue
 		}

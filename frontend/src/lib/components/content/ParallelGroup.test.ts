@@ -54,7 +54,6 @@ describe("ParallelGroup", () => {
       props: {
         toolCalls: [makeToolCall("a"), makeToolCall("b")],
         callTimingByID,
-        turnDurationMs: 5000,
       },
     });
     await tick();
@@ -73,7 +72,6 @@ describe("ParallelGroup", () => {
       target: document.body,
       props: {
         toolCalls: [makeToolCall("a"), makeToolCall("b")],
-        turnDurationMs: 2500,
       },
     });
     await tick();

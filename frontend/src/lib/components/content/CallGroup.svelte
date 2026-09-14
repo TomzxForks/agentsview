@@ -7,9 +7,7 @@
 
   interface Props {
     calls: CallTiming[];
-    groupDurationMs?: number | null;
     barScalePct: (call: CallTiming) => number;
-    headerBarPct?: number;
     onCallClick: (call: CallTiming) => void;
     onSubagentExpand: (call: CallTiming) => void;
     expandedSubagentIds: Set<string>;
@@ -31,6 +29,7 @@
     onSubagentExpand,
     expandedSubagentIds,
     isLive = false,
+    liveDurationMs,
     isSlow,
     expandable = true,
     dimmed = false,
@@ -54,6 +53,7 @@
         {call}
         barWidthPct={barScalePct(call)}
         isLive={isLastLive}
+        liveDurationMs={isLastLive ? liveDurationMs : undefined}
         isSlow={isSlow ? isSlow(call) : false}
         {expandable}
         isSubagentExpanded={call.subagent_session_id != null &&

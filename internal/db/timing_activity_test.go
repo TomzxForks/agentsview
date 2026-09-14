@@ -203,6 +203,31 @@ func TestActivityTiming_StoredExecutionEvidence(t *testing.T) {
 	}
 }
 
+func TestActivityTiming_ClosedSubagentEvidence(t *testing.T) {
+	start := "2026-04-26T10:00:00Z"
+	end := "2026-04-26T10:00:06Z"
+	child := "child"
+	got := AssembleTiming(
+		&Session{ID: "activity", StartedAt: &start, EndedAt: &end},
+		[]TurnRow{
+			{MessageID: 1, Ordinal: 0, Role: "user", ContentLength: 3, Timestamp: start},
+			{MessageID: 2, Ordinal: 1, Role: "assistant", HasToolUse: true, ContentLength: 3, Timestamp: "2026-04-26T10:00:01Z"},
+		},
+		[]CallRow{{
+			MessageID: 2, Category: "Task", SubagentSessionID: &child,
+			SubagentStart: "2026-04-26T10:00:02Z", SubagentEnd: "2026-04-26T10:00:04Z",
+		}},
+		time.Date(2026, 4, 26, 10, 0, 6, 0, time.UTC),
+	)
+	require.Len(t, got.Turns, 1)
+	require.NotNil(t, got.Turns[0].Calls[0].DurationMs)
+	assert.Equal(t, int64(2000), *got.Turns[0].Calls[0].DurationMs)
+	assert.Equal(t, int64(2000), got.ToolDurationMs)
+	assert.Equal(t, ActivityTotals{ToolMs: 2000, UnattributedMs: 4000}, got.ActivityTotals)
+	assert.Equal(t, CategoryTotal{Category: "Task", DurationMs: 2000, CallCount: 1}, got.ByCategory[0])
+	assert.Equal(t, int64(2000), *got.SlowestCall.DurationMs)
+}
+
 func TestActivityTiming_VisiblePrompts(t *testing.T) {
 	for _, tc := range []struct {
 		name, role, subtype, timestamp string

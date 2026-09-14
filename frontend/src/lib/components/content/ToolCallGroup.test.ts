@@ -39,7 +39,7 @@ afterEach(() => {
 });
 
 describe("ToolCallGroup", () => {
-  it("shows legacy calls without stored timing as unknown", async () => {
+  it("omits duration for legacy calls without stored timing", async () => {
     const message = makeToolMessage(1);
     message.tool_calls = [];
     message.content = "[Bash]\npwd";
@@ -49,14 +49,14 @@ describe("ToolCallGroup", () => {
       props: { messages: [message], timestamp: message.timestamp },
     });
     await tick();
-    expect(document.querySelector(".tool-duration")?.textContent?.trim()).toBe("unknown");
+    expect(document.querySelector(".tool-duration")).toBeNull();
     unmount(component);
   });
 
   it.each([
     { duration: 2000, running: false, label: "2.0s" },
     { duration: null, running: false, label: "unknown" },
-    { duration: null, running: true, label: "unknown" },
+    { duration: null, running: true, label: "running" },
   ])("uses call evidence for $label, running=$running", async ({ duration, running, label }) => {
     const message = makeToolMessage(1);
     message.tool_calls = [
@@ -105,7 +105,10 @@ describe("ToolCallGroup", () => {
     });
     await tick();
 
-    expect(document.querySelector(".tool-duration")?.textContent?.trim()).toBe(label);
+    const actual = document.querySelector(".tool-duration")?.textContent?.trim();
+    if (label === "running") expect(actual).toMatch(/^running /);
+    else if (label === "unknown") expect(actual).toBeUndefined();
+    else expect(actual).toBe(label);
     expect(document.querySelector(".group-label")?.textContent).toContain("1 tool call");
     unmount(component);
   });

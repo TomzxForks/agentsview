@@ -6,6 +6,7 @@
   import { copyToClipboard } from "../../utils/clipboard.js";
   import { formatMessageForCopy } from "../../utils/copy-message.js";
   import { parseContent, enrichSegments } from "../../utils/content-parser.js";
+  import { liveTick } from "../../stores/liveTick.svelte.js";
   import { sessionTiming } from "../../stores/sessionTiming.svelte.js";
   import ToolBlock from "./ToolBlock.svelte";
   import ThinkingBlock from "./ThinkingBlock.svelte";
@@ -53,8 +54,18 @@
     return map;
   });
 
-  function soloDurationLabel(ct: CallTiming | undefined): string {
-    return ct?.duration_ms != null ? formatDuration(ct.duration_ms) : m.shared_unknown();
+  function soloDurationLabel(
+    ct: CallTiming | undefined,
+    turn: TurnTiming | undefined,
+    msg: Message,
+  ): string | undefined {
+    if (ct?.duration_ms != null) return formatDuration(ct.duration_ms);
+    if (sessionTiming.timing?.running && turn != null) {
+      const startMs = new Date(turn.started_at ?? msg.timestamp).getTime();
+      const elapsed = Number.isNaN(startMs) ? 0 : Math.max(0, liveTick.now - startMs);
+      return m.tool_call_group_running_duration({ duration: formatDuration(elapsed) });
+    }
+    return undefined;
   }
 
   function isRunningTurn(msg: Message): boolean {
@@ -96,6 +107,7 @@
         <div class="read-progress-divider" role="separator" aria-label={m.read_progress_boundary()}>{divider.label}</div>
       {/if}
       {@const calls = message.tool_calls ?? []}
+      {@const turn = turnByMessage.get(message.id)}
       <div data-message-ordinal={message.ordinal}>
         {#if ui.isBlockVisible("thinking")}
           {#each collectSearchBlocks(message).filter((block) => block.kind === "thinking") as block (block.key)}
@@ -108,7 +120,11 @@
             toolCall={soloCall}
             content=""
             label={displayToolName(soloCall)}
-            durationLabel={soloDurationLabel(callByToolUseID.get(soloCall.tool_use_id ?? ""))}
+            durationLabel={soloDurationLabel(
+              callByToolUseID.get(soloCall.tool_use_id ?? ""),
+              turn,
+              message,
+            )}
             isRunning={isRunningTurn(message)}
             searchScope={searchable ? { ordinal: message.ordinal, callIdx: 0 } : undefined}
           />
@@ -125,7 +141,6 @@
               content={seg.content}
               label={seg.label}
               toolCall={seg.toolCall}
-              durationLabel={m.shared_unknown()}
               searchScope={searchable ? { ordinal: message.ordinal, callIdx: `seg${segIdx}` } : undefined}
             />
           {/each}

@@ -228,13 +228,16 @@ func TestGetSessionTiming_ReadOnlyFixture(t *testing.T) {
 		}
 	})
 
-	t.Run("child timestamps preserve navigation without measuring execution", func(t *testing.T) {
+	t.Run("closed child timestamps provide measured execution", func(t *testing.T) {
 		got, err := d.GetSessionTiming(ctx, "parent")
 		require.NoError(t, err, "GetSessionTiming")
 		dms := got.Turns[0].Calls[0].DurationMs
-		assert.Nil(t, dms, "subagent execution was not measured")
+		require.NotNil(t, dms, "closed subagent execution")
+		assert.Equal(t, int64(134_000), *dms)
 		assert.Equal(t, "child", *got.Turns[0].Calls[0].SubagentSessionID)
-		assert.Zero(t, got.ToolDurationMs)
+		assert.Equal(t, int64(134_000), got.ToolDurationMs)
+		require.Len(t, got.ByCategory, 1)
+		assert.Equal(t, CategoryTotal{Category: "Task", DurationMs: 134_000, CallCount: 1}, got.ByCategory[0])
 		assert.Equal(t, 1, got.SubagentCount, "SubagentCount")
 	})
 

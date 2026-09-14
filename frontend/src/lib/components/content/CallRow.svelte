@@ -10,13 +10,11 @@
     call: CallTiming;
     barWidthPct: number;
     isSlow?: boolean;
-    isShared?: boolean;
     isLive?: boolean;
     liveDurationMs?: number;
     isSubagentExpanded?: boolean;
     expandable?: boolean;
     dimmed?: boolean;
-    sharedDurationLabel?: string | null;
     onClick?: () => void;
     onChevronClick?: () => void;
   }
@@ -26,6 +24,7 @@
     barWidthPct,
     isSlow = false,
     isLive = false,
+    liveDurationMs,
     isSubagentExpanded = false,
     expandable = true,
     dimmed = false,
@@ -35,9 +34,14 @@
 
   let isSubagent = $derived(call.subagent_session_id != null);
 
-  let durationLabel = $derived(
-    call.duration_ms != null ? formatDuration(call.duration_ms) : m.shared_unknown(),
-  );
+  let durationLabel = $derived.by(() => {
+    if (isLive) {
+      return m.call_row_running_duration({
+        duration: formatDuration(liveDurationMs ?? call.duration_ms ?? 0),
+      });
+    }
+    return call.duration_ms != null ? formatDuration(call.duration_ms) : m.shared_unknown();
+  });
 
   function handleChevronClick(e: MouseEvent) {
     e.stopPropagation();

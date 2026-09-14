@@ -302,7 +302,6 @@
       }
     }
   ],
-  "parallel_group_each_duration": "각각 ≤ {duration}",
   "parallel_group_running": "실행 중...",
   "subagent_inline_label": "서브에이전트 세션",
   "subagent_inline_message_count": [

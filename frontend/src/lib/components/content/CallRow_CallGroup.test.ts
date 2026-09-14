@@ -116,7 +116,7 @@ describe("CallRow", () => {
     unmount(c);
   });
 
-  it("renders an open call as unknown even with live elapsed time", async () => {
+  it("renders an open call with live elapsed time", async () => {
     const c = mount(CallRow, {
       target: document.body,
       props: {
@@ -130,7 +130,7 @@ describe("CallRow", () => {
     const html = document.body.innerHTML;
     dumpHtml("call-row-live.html", html);
 
-    expect(document.querySelector(".cd")?.textContent?.trim()).toBe("unknown");
+    expect(document.querySelector(".cd")?.textContent?.trim()).toBe("running 4.0s+");
     expect(document.querySelector<HTMLElement>(".cbar")?.style.width).toBe("0%");
 
     unmount(c);
@@ -200,8 +200,6 @@ describe("CallRow", () => {
       props: {
         call: makeCall({ duration_ms: null }),
         barWidthPct: 25,
-        isShared: true,
-        sharedDurationLabel: "≤2.5s",
       },
     });
     await tick();
@@ -245,9 +243,7 @@ describe("CallGroup", () => {
       target: document.body,
       props: {
         calls,
-        groupDurationMs: 2500,
         barScalePct: () => 40,
-        headerBarPct: 70,
         onCallClick,
         onSubagentExpand: () => {},
         expandedSubagentIds: new Set<string>(),
@@ -263,7 +259,7 @@ describe("CallGroup", () => {
     expect([...document.querySelectorAll(".cd")].map((el) => el.textContent?.trim())).toEqual([
       "1.2s",
       "unknown",
-      "unknown",
+      "running 4.0s+",
     ]);
     expect(
       [...document.querySelectorAll<HTMLElement>(".cbar")].map((el) => el.style.width),
@@ -304,9 +300,7 @@ describe("CallGroup", () => {
       target: document.body,
       props: {
         calls,
-        groupDurationMs: 1500,
         barScalePct: () => 30,
-        headerBarPct: 50,
         onCallClick: () => {},
         onSubagentExpand: () => {},
         expandedSubagentIds: new Set<string>(),
@@ -336,9 +330,7 @@ describe("CallGroup", () => {
       target: document.body,
       props: {
         calls,
-        groupDurationMs: null,
         barScalePct: () => 10,
-        headerBarPct: 12,
         onCallClick: () => {},
         onSubagentExpand: () => {},
         expandedSubagentIds: new Set<string>(),

@@ -142,7 +142,11 @@ func (s *Store) queryCallRows(
 		    ORDER BY tre.event_index DESC
 		    LIMIT 1
 		  ) AS execution_completed_at
+		  ,s_sub.started_at
+		  ,s_sub.ended_at
 		FROM tool_calls tc
+		LEFT JOIN sessions s_sub
+		  ON s_sub.id = tc.subagent_session_id
 		WHERE tc.session_id = $1
 		ORDER BY tc.message_ordinal, tc.id
 	`, sessionID)
@@ -155,11 +159,12 @@ func (s *Store) queryCallRows(
 	for rows.Next() {
 		var msgOrdinal int
 		var toolUseID, inputJSON, skill, sub sql.NullString
-		var executionStarted, executionCompleted *time.Time
+		var executionStarted, executionCompleted, subagentStarted, subagentEnded *time.Time
 		var toolName, category string
 		if err := rows.Scan(
 			&msgOrdinal, &toolUseID, &toolName, &category,
 			&skill, &sub, &inputJSON, &executionStarted, &executionCompleted,
+			&subagentStarted, &subagentEnded,
 		); err != nil {
 			return nil, fmt.Errorf("scanning timing call: %w", err)
 		}
@@ -187,6 +192,12 @@ func (s *Store) queryCallRows(
 		}
 		if executionCompleted != nil {
 			r.ExecutionEnd = FormatISO8601(*executionCompleted)
+		}
+		if subagentStarted != nil {
+			r.SubagentStart = FormatISO8601(*subagentStarted)
+		}
+		if subagentEnded != nil {
+			r.SubagentEnd = FormatISO8601(*subagentEnded)
 		}
 		out = append(out, r)
 	}

@@ -146,9 +146,9 @@ afterEach(async () => {
 });
 
 describe("MessageContent", () => {
-  it("shows legacy calls without stored timing as unknown", async () => {
+  it("omits duration for legacy calls without stored timing", async () => {
     const component = await render(message({ content: "[Bash]\npwd", has_tool_use: true }));
-    expect(document.querySelector(".tool-duration")?.textContent?.trim()).toBe("unknown");
+    expect(document.querySelector(".tool-duration")).toBeNull();
     unmount(component);
   });
 
@@ -156,7 +156,7 @@ describe("MessageContent", () => {
     { duration: 2000, running: false, label: "2.0s" },
     { duration: 0, running: false, label: "0ms" },
     { duration: null, running: false, label: "unknown" },
-    { duration: null, running: true, label: "unknown" },
+    { duration: null, running: true, label: "running" },
   ])(
     "uses the call evidence for $label, running=$running",
     async ({ duration, running, label }) => {
@@ -207,7 +207,10 @@ describe("MessageContent", () => {
         }),
       );
 
-      expect(document.querySelector(".tool-duration")?.textContent?.trim()).toBe(label);
+      const actual = document.querySelector(".tool-duration")?.textContent?.trim();
+      if (label === "running") expect(actual).toMatch(/^running /);
+      else if (label === "unknown") expect(actual).toBeUndefined();
+      else expect(actual).toBe(label);
       unmount(component);
     },
   );

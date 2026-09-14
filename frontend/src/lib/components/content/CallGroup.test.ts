@@ -36,9 +36,7 @@ describe("CallGroup measured timing", () => {
       props: {
         calls,
         isLive,
-        groupDurationMs: 5000,
         liveDurationMs: 6000,
-        headerBarPct: 100,
         barScalePct: () => 40,
         onCallClick,
         onSubagentExpand,
@@ -49,7 +47,7 @@ describe("CallGroup measured timing", () => {
 
     expect([...document.querySelectorAll(".cd")].map((el) => el.textContent?.trim())).toEqual([
       "2.0s",
-      "unknown",
+      isLive ? "running 6.0s+" : "unknown",
     ]);
     expect(
       [...document.querySelectorAll<HTMLElement>(".cbar")].map((el) => el.style.width),

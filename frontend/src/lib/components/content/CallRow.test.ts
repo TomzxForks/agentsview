@@ -13,8 +13,8 @@ describe("CallRow measured timing", () => {
     { duration: 2000, isLive: false, label: "2.0s", width: "40%" },
     { duration: 0, isLive: false, label: "0ms", width: "0%" },
     { duration: null, isLive: false, label: "unknown", width: "0%" },
-    { duration: null, isLive: true, label: "unknown", width: "0%" },
-    { duration: 2000, isLive: true, label: "2.0s", width: "40%" },
+    { duration: null, isLive: true, label: "running 5.0s+", width: "0%" },
+    { duration: 2000, isLive: true, label: "running 5.0s+", width: "40%" },
   ])(
     "renders $label from the call when live=$isLive",
     async ({ duration, isLive, label, width }) => {
@@ -33,7 +33,6 @@ describe("CallRow measured timing", () => {
           barWidthPct: 40,
           isLive,
           liveDurationMs: 5000,
-          sharedDurationLabel: "≤5.0s",
         },
       });
       await tick();

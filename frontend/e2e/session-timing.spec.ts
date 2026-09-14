@@ -1,6 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 
-// The served fixture includes measured Bash execution and unknown Read/Task calls.
+// The served fixture includes measured Bash and closed-child Task execution plus unknown Read calls.
 
 const SHOWCASE = "test-session-duration-showcase";
 const SHOWCASE_WORKTREE =
@@ -59,12 +59,12 @@ test.describe("Session Vital Signs", () => {
     const response = await page.request.get(`/api/v1/sessions/${SHOWCASE}/timing`);
     expect(response.ok()).toBe(true);
     const timing = await response.json();
-    expect(timing.tool_duration_ms).toBe(20_000);
+    expect(timing.tool_duration_ms).toBe(140_000);
     expect(timing.activity_totals).toEqual({
       thinking_ms: 0,
       generation_ms: 0,
-      tool_ms: 20_000,
-      unattributed_ms: 155_000,
+      tool_ms: 140_000,
+      unattributed_ms: 35_000,
     });
     expect(timing.activity).toEqual([
       expect.objectContaining({
@@ -72,8 +72,8 @@ test.describe("Session Vital Signs", () => {
         duration_ms: 139_000,
         thinking_ms: 0,
         generation_ms: 0,
-        tool_ms: 0,
-        unattributed_ms: 139_000,
+        tool_ms: 120_000,
+        unattributed_ms: 19_000,
         precision: "message_only",
         running: false,
       }),
@@ -100,7 +100,7 @@ test.describe("Session Vital Signs", () => {
     const task = page
       .locator(".calls .call")
       .filter({ has: page.locator(".cn", { hasText: "Task" }) });
-    await expect(task.locator(".cd")).toHaveText("unknown");
+    await expect(task.locator(".cd")).toHaveText("2m 0s");
 
     const activity = page.locator('.activity-row[data-activity-ordinal="5"]');
     await expect(activity.locator('[data-activity-kind="tool"]')).toHaveAttribute(

@@ -302,7 +302,6 @@
       }
     }
   ],
-  "parallel_group_each_duration": "每个 ≤ {duration}",
   "parallel_group_running": "运行中...",
   "subagent_inline_label": "Subagent 会话",
   "subagent_inline_message_count": [

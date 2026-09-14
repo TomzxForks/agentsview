@@ -79,6 +79,8 @@ type CallRow struct {
 	InputJSON         string
 	ExecutionStart    string
 	ExecutionEnd      string
+	SubagentStart     string
+	SubagentEnd       string
 }
 
 // GetSessionTiming computes the per-session timing summary. Returns
@@ -203,8 +205,11 @@ func (db *DB) queryCallRows(
 		    ORDER BY tre.event_index DESC
 		    LIMIT 1
 		  ) AS execution_completed_at
+		  ,s_sub.started_at
+		  ,s_sub.ended_at
 		FROM tool_calls tc
 		JOIN messages m ON m.id = tc.message_id
+		LEFT JOIN sessions s_sub ON s_sub.id = tc.subagent_session_id
 		WHERE tc.session_id = ?
 		ORDER BY tc.message_id, tc.id
 	`, sessionID)
@@ -217,10 +222,11 @@ func (db *DB) queryCallRows(
 	for rows.Next() {
 		var r CallRow
 		var toolUseID, inputJSON sql.NullString
-		var skill, sub, executionStarted, executionCompleted sql.NullString
+		var skill, sub, executionStarted, executionCompleted, subagentStarted, subagentEnded sql.NullString
 		if err := rows.Scan(
 			&r.MessageID, &toolUseID, &r.ToolName, &r.Category,
 			&skill, &sub, &inputJSON, &executionStarted, &executionCompleted,
+			&subagentStarted, &subagentEnded,
 		); err != nil {
 			return nil, err
 		}
@@ -240,6 +246,8 @@ func (db *DB) queryCallRows(
 		}
 		r.ExecutionStart = executionStarted.String
 		r.ExecutionEnd = executionCompleted.String
+		r.SubagentStart = subagentStarted.String
+		r.SubagentEnd = subagentEnded.String
 		out = append(out, r)
 	}
 	return out, rows.Err()

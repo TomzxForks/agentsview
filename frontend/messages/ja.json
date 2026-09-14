@@ -312,7 +312,6 @@
       }
     }
   ],
-  "parallel_group_each_duration": "≤ 各 {duration}",
   "parallel_group_running": "走っています...",
   "subagent_inline_label": "サブエージェントセッション",
   "subagent_inline_message_count": [

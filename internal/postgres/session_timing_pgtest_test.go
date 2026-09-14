@@ -239,7 +239,7 @@ func TestPGGetSessionTiming_NoToolUseHasNoTurnDuration(t *testing.T) {
 	assert.Equal(t, 0, got.TurnCount)
 }
 
-func TestPGGetSessionTiming_SubagentTimestampsPreserveIdentityOnly(t *testing.T) {
+func TestPGGetSessionTiming_ClosedSubagentTimestampsMeasureExecution(t *testing.T) {
 	pgURL := testPGURL(t)
 	ensureStoreSchema(t, pgURL)
 
@@ -270,9 +270,12 @@ func TestPGGetSessionTiming_SubagentTimestampsPreserveIdentityOnly(t *testing.T)
 		context.Background(), "timing-parent",
 	)
 	require.NoError(t, err, "GetSessionTiming")
-	assert.Nil(t, got.Turns[0].Calls[0].DurationMs)
+	require.NotNil(t, got.Turns[0].Calls[0].DurationMs)
+	assert.Equal(t, int64(134_000), *got.Turns[0].Calls[0].DurationMs)
 	assert.Equal(t, new("timing-child"), got.Turns[0].Calls[0].SubagentSessionID)
-	assert.Zero(t, got.ToolDurationMs)
+	assert.Equal(t, int64(134_000), got.ToolDurationMs)
+	require.Len(t, got.ByCategory, 1)
+	assert.Equal(t, db.CategoryTotal{Category: "Task", DurationMs: 134_000, CallCount: 1}, got.ByCategory[0])
 	assert.Equal(t, 1, got.SubagentCount)
 }
 

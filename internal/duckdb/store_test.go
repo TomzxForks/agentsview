@@ -4482,11 +4482,11 @@ func TestGetSessionTimingActivityTimingParity(t *testing.T) {
 		wantDuration         *int64
 	}
 	for _, tc := range []struct {
-		name                                     string
-		executions                               []execution
-		noPrompt, staleEnd, carriers, openChild  bool
-		wantDuration, wantTool, wantUnattributed int64
-		wantCategories                           []db.CategoryTotal
+		name                                                 string
+		executions                                           []execution
+		noPrompt, staleEnd, carriers, openChild, closedChild bool
+		wantDuration, wantTool, wantUnattributed             int64
+		wantCategories                                       []db.CategoryTotal
 	}{
 		{name: "measured thinking followed by tool", executions: []execution{{"Bash", "02", "04", new(int64(2000))}}, wantDuration: 6000, wantTool: 2000, wantUnattributed: 4000, wantCategories: []db.CategoryTotal{{Category: "Bash", DurationMs: 2000, CallCount: 1}}},
 		{name: "missing execution", executions: []execution{{category: "Bash"}}, wantDuration: 6000, wantUnattributed: 6000, wantCategories: []db.CategoryTotal{{Category: "Bash", CallCount: 1}}},
@@ -4495,6 +4495,7 @@ func TestGetSessionTimingActivityTimingParity(t *testing.T) {
 		{name: "no visible prompt", noPrompt: true, executions: []execution{{"Bash", "02", "04", new(int64(2000))}}, wantTool: 2000, wantCategories: []db.CategoryTotal{{Category: "Bash", DurationMs: 2000, CallCount: 1}}},
 		{name: "system and tool result carriers", carriers: true, executions: []execution{{"Bash", "02", "04", new(int64(2000))}}, wantDuration: 6000, wantTool: 2000, wantUnattributed: 4000, wantCategories: []db.CategoryTotal{{Category: "Bash", DurationMs: 2000, CallCount: 1}}},
 		{name: "open child", openChild: true, executions: []execution{{category: "Task"}}, wantDuration: 6000, wantUnattributed: 6000, wantCategories: []db.CategoryTotal{{Category: "Task", CallCount: 1}}},
+		{name: "closed child", closedChild: true, executions: []execution{{category: "Task", wantDuration: new(int64(2000))}}, wantDuration: 6000, wantTool: 2000, wantUnattributed: 4000, wantCategories: []db.CategoryTotal{{Category: "Task", DurationMs: 2000, CallCount: 1}}},
 		{name: "zero execution", executions: []execution{{"Bash", "02", "02", new(int64(0))}}, wantDuration: 6000, wantUnattributed: 6000, wantCategories: []db.CategoryTotal{{Category: "Bash", CallCount: 1}}},
 		{name: "backward execution", executions: []execution{{"Bash", "04", "02", nil}}, wantDuration: 6000, wantUnattributed: 6000, wantCategories: []db.CategoryTotal{{Category: "Bash", CallCount: 1}}},
 		{name: "open execution", executions: []execution{{"Bash", "02", "", nil}}, wantDuration: 6000, wantUnattributed: 6000, wantCategories: []db.CategoryTotal{{Category: "Bash", CallCount: 1}}},
@@ -4517,7 +4518,7 @@ func TestGetSessionTimingActivityTimingParity(t *testing.T) {
 			for i, execution := range tc.executions {
 				id := fmt.Sprintf("call-%d", i)
 				call := db.ToolCall{ToolUseID: id, ToolName: execution.category, Category: execution.category, CallIndex: i, InputJSON: "{}"}
-				if tc.openChild {
+				if tc.openChild || tc.closedChild {
 					call.SubagentSessionID = "duck-timing-child"
 				}
 				for _, event := range []struct{ status, timestamp string }{{"started", execution.start}, {"completed", execution.end}} {
@@ -4545,9 +4546,14 @@ func TestGetSessionTimingActivityTimingParity(t *testing.T) {
 				messages = append(messages, syncMessage(sessionID, 5, "user", "next", "2026-04-26T10:00:06Z"))
 			}
 			writes := []db.SessionBatchWrite{{Session: sess, Messages: messages, DataVersion: 1, ReplaceMessages: true}}
-			if tc.openChild {
+			if tc.openChild || tc.closedChild {
 				child := syncSession("duck-timing-child", "timing", "child", "2026-04-26T10:00:02Z", 0)
-				child.EndedAt = nil
+				if tc.openChild {
+					child.EndedAt = nil
+				} else {
+					childEnd := "2026-04-26T10:00:04Z"
+					child.EndedAt = &childEnd
+				}
 				writes = append(writes, db.SessionBatchWrite{Session: child, DataVersion: 1, ReplaceMessages: true})
 			}
 			_, err := local.WriteSessionBatchAtomic(writes)

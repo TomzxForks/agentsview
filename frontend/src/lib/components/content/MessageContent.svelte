@@ -155,8 +155,18 @@
     }
     return map;
   });
-  function soloDurationLabel(ct: CallTiming | undefined): string {
-    return ct?.duration_ms != null ? formatDuration(ct.duration_ms) : m.shared_unknown();
+  function soloDurationLabel(
+    ct: CallTiming | undefined,
+    turn: TurnTiming | undefined,
+    msg: Message,
+  ): string | undefined {
+    if (ct?.duration_ms != null) return formatDuration(ct.duration_ms);
+    if (sessionTiming.timing?.running && turn != null) {
+      const startMs = new Date(turn.started_at ?? msg.timestamp).getTime();
+      const elapsed = Number.isNaN(startMs) ? 0 : Math.max(0, liveTick.now - startMs);
+      return m.message_content_running_duration({ duration: formatDuration(elapsed) });
+    }
+    return undefined;
   }
   function isRunningTurn(msg: Message): boolean {
     if (!sessionTiming.timing?.running) return false;
@@ -316,11 +326,16 @@
       {/if}
     {/each}
     {#if ui.isBlockVisible("tool")}
+      {@const turn = turnByMessage.get(message.id)}
       {@const structuredCalls = message.tool_calls ?? []}
       {#if structuredCalls.length === 1}
         {@const soloCall = structuredCalls[0]!}
         <ToolBlock toolCall={soloCall} content="" label={displayToolName(soloCall)}
-          durationLabel={soloDurationLabel(callByToolUseID.get(soloCall.tool_use_id ?? ""))}
+          durationLabel={soloDurationLabel(
+            callByToolUseID.get(soloCall.tool_use_id ?? ""),
+            turn,
+            message,
+          )}
           isRunning={isRunningTurn(message)}
           searchScope={activeSearchOrdinal === undefined ? undefined : { ordinal: activeSearchOrdinal, callIdx: 0 }} />
       {:else if structuredCalls.length >= 2}
@@ -329,7 +344,6 @@
       {:else}
         {#each segments.filter((s) => s.type === "tool") as seg, segIdx (`${message.id}-${segIdx}`)}
           <ToolBlock content={seg.content} label={seg.label} toolCall={seg.toolCall}
-            durationLabel={m.shared_unknown()}
             searchScope={activeSearchOrdinal === undefined ? undefined : { ordinal: activeSearchOrdinal, callIdx: `seg${segIdx}` }} />
         {/each}
       {/if}

@@ -1,9 +1,11 @@
 <!-- ABOUTME: Inline-expansion of a sub-agent session's call list inside the parent Calls section. -->
 <script lang="ts">
   import { m } from "../../i18n/index.js";
+  import { liveTick } from "../../stores/liveTick.svelte.js";
   import type {
     SessionTiming,
     CallTiming,
+    TurnTiming,
   } from "../../api/types/timing.js";
   import { formatDuration } from "../../utils/duration.js";
   import { formatNumber } from "../../utils/format.js";
@@ -35,6 +37,12 @@
   function isLastTurn(idx: number): boolean {
     return idx === timing.turns.length - 1;
   }
+
+  function liveElapsedFor(turn: TurnTiming): number {
+    const start = new Date(turn.started_at).getTime();
+    if (Number.isNaN(start)) return 0;
+    return Math.max(0, liveTick.now - start);
+  }
 </script>
 
 <div class="sa-expand">
@@ -53,12 +61,14 @@
     {#each timing.turns as turn, i (turn.message_id)}
       {@const isLive =
         turn.duration_ms == null && isLastTurn(i) && timing.running}
+      {@const liveElapsed = isLive ? liveElapsedFor(turn) : undefined}
       {#if turn.calls.length === 1}
         {@const call = turn.calls[0]!}
         <CallRow
           {call}
           barWidthPct={barScalePct(call)}
           isLive={isLive}
+          liveDurationMs={liveElapsed}
           expandable={false}
           dimmed={categoryFilter !== null &&
             call.category !== categoryFilter}
@@ -68,6 +78,7 @@
           calls={turn.calls}
           {barScalePct}
           isLive={isLive}
+          liveDurationMs={liveElapsed}
           expandable={false}
           dimmed={categoryFilter !== null &&
             turn.primary_category !== categoryFilter}

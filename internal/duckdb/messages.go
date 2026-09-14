@@ -570,8 +570,11 @@ func (s *Store) queryCallRows(
 				ORDER BY tre.event_index DESC
 				LIMIT 1
 			) AS execution_completed_at
+			,s_sub.started_at
+			,s_sub.ended_at
 		FROM tool_calls tc
 		JOIN messages m ON m.id = tc.message_id
+		LEFT JOIN sessions s_sub ON s_sub.id = tc.subagent_session_id
 		WHERE tc.session_id = ?
 		ORDER BY tc.message_id, tc.call_index`,
 		sessionID,
@@ -585,10 +588,11 @@ func (s *Store) queryCallRows(
 	for rows.Next() {
 		var r db.CallRow
 		var skill, sub sql.NullString
-		var executionStarted, executionCompleted any
+		var executionStarted, executionCompleted, subagentStarted, subagentEnded any
 		if err := rows.Scan(
 			&r.MessageID, &r.ToolUseID, &r.ToolName, &r.Category,
 			&skill, &sub, &r.InputJSON, &executionStarted, &executionCompleted,
+			&subagentStarted, &subagentEnded,
 		); err != nil {
 			return nil, fmt.Errorf("scanning duckdb timing call: %w", err)
 		}
@@ -602,6 +606,8 @@ func (s *Store) queryCallRows(
 		}
 		r.ExecutionStart = formatDBTime(executionStarted)
 		r.ExecutionEnd = formatDBTime(executionCompleted)
+		r.SubagentStart = formatDBTime(subagentStarted)
+		r.SubagentEnd = formatDBTime(subagentEnded)
 		out = append(out, r)
 	}
 	return out, rows.Err()

@@ -146,6 +146,9 @@ func assembleTurnActivity(out *SessionTiming, sess *Session, turns []TurnRow, ca
 		}
 		return out.ByCategory[i].DurationMs > out.ByCategory[j].DurationMs
 	})
+	if len(starts) == 0 {
+		return intervals
+	}
 	for i := range out.Activity {
 		end := upper
 		if i+1 < len(starts) {

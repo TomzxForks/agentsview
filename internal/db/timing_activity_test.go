@@ -115,7 +115,14 @@ func TestActivityTiming_Intervals(t *testing.T) {
 			got := AssembleTiming(sess, turns, tc.calls, time.Date(2026, 4, 26, 10, 0, 6, 0, time.UTC))
 			assert.Equal(t, tc.running, got.Running)
 			assert.Equal(t, tc.tool, got.ToolDurationMs)
-			assert.Equal(t, tc.tool, got.ActivityTotals.ToolMs)
+			var activityTool int64
+			for _, value := range tc.tools {
+				activityTool += value
+			}
+			if len(tc.prompts) == 0 {
+				activityTool = tc.tool
+			}
+			assert.Equal(t, activityTool, got.ActivityTotals.ToolMs)
 			assert.Zero(t, got.ActivityTotals.ThinkingMs)
 			assert.Zero(t, got.ActivityTotals.GenerationMs)
 			require.NotNil(t, got.Activity)
@@ -247,6 +254,7 @@ func TestActivityTiming_PreservesEvidenceBeforeFirstPrompt(t *testing.T) {
 	require.NotNil(t, got.Turns[0].Calls[0].DurationMs)
 	assert.Equal(t, int64(1000), *got.Turns[0].Calls[0].DurationMs)
 	assert.Equal(t, int64(1000), got.ToolDurationMs)
+	assert.Equal(t, ActivityTotals{UnattributedMs: 3000}, got.ActivityTotals)
 	assert.Equal(t, CategoryTotal{Category: "Bash", DurationMs: 1000, CallCount: 1}, got.ByCategory[0])
 	assert.Equal(t, int64(1000), *got.SlowestCall.DurationMs)
 }

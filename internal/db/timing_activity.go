@@ -131,7 +131,10 @@ func assembleTurnActivity(out *SessionTiming, sess *Session, turns []TurnRow, ca
 		measured = append(measured, clipped)
 	}
 	out.ToolDurationMs = activityUnionMs(measuredTotals)
-	out.ActivityTotals.ToolMs = out.ToolDurationMs
+	out.ActivityTotals.ToolMs = activityUnionMs(measured)
+	if len(starts) == 0 {
+		out.ActivityTotals.ToolMs = out.ToolDurationMs
+	}
 	for category, count := range counts {
 		out.ByCategory = append(out.ByCategory, CategoryTotal{
 			Category: category, CallCount: count, DurationMs: activityUnionMs(byCategory[category]),

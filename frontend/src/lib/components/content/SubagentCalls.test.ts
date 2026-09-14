@@ -72,7 +72,7 @@ describe("SubagentCalls measured timing", () => {
       };
       const component = mount(SubagentCalls, {
         target: document.body,
-        props: { timing, barScalePct: () => 50 },
+        props: { timing, barScalePct: () => 50, categoryFilter: "Read" },
       });
       await tick();
 
@@ -84,6 +84,7 @@ describe("SubagentCalls measured timing", () => {
         [...document.querySelectorAll<HTMLElement>(".cbar")].map((el) => el.style.width),
       ).toEqual(["50%", "0%", "0%"]);
       expect(document.querySelector(".sa-eh-meta")?.textContent).toContain("3 calls");
+      expect(document.querySelector(".cgroup")?.classList.contains("dimmed")).toBe(false);
       expect(document.querySelector("button.chev")).toBeNull();
       unmount(component);
     },

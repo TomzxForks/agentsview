@@ -9,6 +9,7 @@
   import { formatDuration } from "../../utils/duration.js";
   import { categoryToken } from "../../utils/categoryToken.js";
   import { activityToken, type ActivityKind } from "../../utils/activityToken.js";
+  import { turnHasCategory } from "../../utils/timing.js";
   import { displayToolName } from "../../utils/toolDisplay.js";
   import { ui } from "../../stores/ui.svelte.js";
   import { m } from "../../i18n/index.js";
@@ -517,7 +518,7 @@
               <button
                 class="lane-mark"
                 class:live={isLive}
-                class:dimmed={categoryFilter !== null && t.primary_category !== categoryFilter}
+                class:dimmed={categoryFilter !== null && !turnHasCategory(t, categoryFilter)}
                 style="left: {turnLeftPct(t)}%; width: {turnWidthPct(t)}%; {isLive
                   ? ''
                   : `background: ${categoryToken(t.primary_category)};`}"
@@ -542,7 +543,7 @@
           >
             <span class="lane-label">{cat.category}</span>
             <span class="lane-track">
-              {#each timing.turns.filter((tt) => tt.primary_category === cat.category) as t (t.message_id)}
+              {#each timing.turns.filter((tt) => turnHasCategory(tt, cat.category)) as t (t.message_id)}
                 {@const isLive = t.duration_ms == null}
                 <button
                   class="lane-mark"
@@ -674,8 +675,7 @@
                   {isLive}
                   liveDurationMs={liveElapsed}
                   isSlow={isSlowCall}
-                  dimmed={categoryFilter !== null &&
-                    turn.primary_category !== categoryFilter}
+                  dimmed={categoryFilter !== null && !turnHasCategory(turn, categoryFilter)}
                   onCallClick={() => ui.scrollToOrdinal(turn.ordinal)}
                   onSubagentExpand={(c) => {
                     void toggleSubagent(c);

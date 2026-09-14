@@ -127,6 +127,10 @@ describe("SessionVitals", () => {
       is_parallel: true,
       input_preview: "main.go",
     });
+    timing.by_category = [
+      { category: "Bash", duration_ms: 2000, call_count: 1 },
+      { category: "Read", duration_ms: 0, call_count: 1 },
+    ];
     timing.tool_call_count = 2;
     mocks.fetchSessionTiming.mockResolvedValue(timing);
     component = mount(SessionVitals, {
@@ -164,6 +168,20 @@ describe("SessionVitals", () => {
     expect(
       [...document.querySelectorAll<HTMLElement>(".cbar")].map((el) => el.style.width),
     ).toEqual(["100%", "0%"]);
+    const readCategory = [...document.querySelectorAll<HTMLButtonElement>(".agg-row")].find(
+      (row) => row.querySelector(".agg-name")?.textContent?.trim() === "Read",
+    );
+    expect(readCategory).not.toBeUndefined();
+    readCategory!.click();
+    await tick();
+    expect(document.querySelector(".cgroup")?.classList.contains("dimmed")).toBe(false);
+    expect(document.querySelector(".lane-row .lane-mark")?.classList.contains("dimmed")).toBe(
+      false,
+    );
+    const readLane = [...document.querySelectorAll(".lane-row")].find(
+      (row) => row.querySelector(".lane-label")?.textContent?.trim() === "Read",
+    );
+    expect(readLane?.querySelector(".lane-mark")).not.toBeNull();
     const scroll = vi.spyOn(ui, "scrollToOrdinal");
     row!.click();
     expect(scroll).toHaveBeenCalledWith(4);

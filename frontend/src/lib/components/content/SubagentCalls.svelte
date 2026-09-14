@@ -9,6 +9,7 @@
   } from "../../api/types/timing.js";
   import { formatDuration } from "../../utils/duration.js";
   import { formatNumber } from "../../utils/format.js";
+  import { turnHasCategory } from "../../utils/timing.js";
   import CallRow from "./CallRow.svelte";
   import CallGroup from "./CallGroup.svelte";
 
@@ -80,8 +81,7 @@
           isLive={isLive}
           liveDurationMs={liveElapsed}
           expandable={false}
-          dimmed={categoryFilter !== null &&
-            turn.primary_category !== categoryFilter}
+          dimmed={categoryFilter !== null && !turnHasCategory(turn, categoryFilter)}
           onCallClick={() => {}}
           onSubagentExpand={noopExpand}
           expandedSubagentIds={noSubagentExpansion}

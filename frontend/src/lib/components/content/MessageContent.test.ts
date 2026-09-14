@@ -147,9 +147,8 @@ afterEach(async () => {
 
 describe("MessageContent", () => {
   it("omits duration for legacy calls without stored timing", async () => {
-    const component = await render(message({ content: "[Bash]\npwd", has_tool_use: true }));
+    await render(message({ content: "[Bash]\npwd", has_tool_use: true }));
     expect(document.querySelector(".tool-duration")).toBeNull();
-    unmount(component);
   });
 
   it.each([
@@ -157,9 +156,10 @@ describe("MessageContent", () => {
     { duration: 0, running: false, label: "0ms" },
     { duration: null, running: false, label: "unknown" },
     { duration: null, running: true, label: "running" },
+    { duration: null, running: true, turnDurationMs: 5000, label: "unknown" },
   ])(
     "uses the call evidence for $label, running=$running",
-    async ({ duration, running, label }) => {
+    async ({ duration, running, turnDurationMs, label }) => {
       timingState.timing = {
         session_id: "session-1",
         total_duration_ms: 6000,
@@ -182,7 +182,7 @@ describe("MessageContent", () => {
             message_id: 1,
             ordinal: 0,
             started_at: "2026-02-20T12:30:00Z",
-            duration_ms: running ? null : 5000,
+            duration_ms: turnDurationMs ?? (running ? null : 5000),
             primary_category: "Bash",
             calls: [
               {
@@ -197,8 +197,9 @@ describe("MessageContent", () => {
           },
         ],
       };
-      const component = await render(
+      await render(
         message({
+          id: 1,
           content: "",
           has_tool_use: true,
           tool_calls: [
@@ -211,7 +212,6 @@ describe("MessageContent", () => {
       if (label === "running") expect(actual).toMatch(/^running /);
       else if (label === "unknown") expect(actual).toBeUndefined();
       else expect(actual).toBe(label);
-      unmount(component);
     },
   );
 

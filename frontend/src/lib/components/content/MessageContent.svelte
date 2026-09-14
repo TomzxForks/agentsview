@@ -161,7 +161,7 @@
     msg: Message,
   ): string | undefined {
     if (ct?.duration_ms != null) return formatDuration(ct.duration_ms);
-    if (sessionTiming.timing?.running && turn != null) {
+    if (sessionTiming.timing?.running && turn != null && turn.duration_ms == null) {
       const startMs = new Date(turn.started_at ?? msg.timestamp).getTime();
       const elapsed = Number.isNaN(startMs) ? 0 : Math.max(0, liveTick.now - startMs);
       return m.message_content_running_duration({ duration: formatDuration(elapsed) });

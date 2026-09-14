@@ -57,7 +57,8 @@ describe("ToolCallGroup", () => {
     { duration: 2000, running: false, label: "2.0s" },
     { duration: null, running: false, label: "unknown" },
     { duration: null, running: true, label: "running" },
-  ])("uses call evidence for $label, running=$running", async ({ duration, running, label }) => {
+    { duration: null, running: true, turnDurationMs: 5000, label: "unknown" },
+  ])("uses call evidence for $label, running=$running", async ({ duration, running, turnDurationMs, label }) => {
     const message = makeToolMessage(1);
     message.tool_calls = [
       { tool_use_id: "call-1", tool_name: "Bash", input_json: '{"command":"pwd"}' },
@@ -84,7 +85,7 @@ describe("ToolCallGroup", () => {
           message_id: 2,
           ordinal: 1,
           started_at: message.timestamp,
-          duration_ms: running ? null : 5000,
+          duration_ms: turnDurationMs ?? (running ? null : 5000),
           primary_category: "Bash",
           calls: [
             {

@@ -16,6 +16,7 @@
   import type {
     CallTiming,
     SessionTiming,
+    TurnActivity,
     TurnTiming,
   } from "../../api/types/timing.js";
   import ActivityLane from "./ActivityLane.svelte";
@@ -179,6 +180,35 @@
     const start = new Date(turn.started_at).getTime();
     if (Number.isNaN(start)) return 0;
     return Math.max(0, liveTick.now - start);
+  }
+
+  function activityDuration(activity: TurnActivity): number {
+    if (!activity.running) return activity.duration_ms;
+    const start = new Date(activity.started_at).getTime();
+    if (Number.isNaN(start)) return activity.duration_ms;
+    return Math.max(activity.duration_ms, liveTick.now - start, 0);
+  }
+
+  function activityValue(
+    activity: TurnActivity,
+    kind: ActivityKind,
+    durationMs: number,
+  ): number {
+    if (kind !== "unattributed") return activity[`${kind}_ms`];
+    return Math.max(
+      0,
+      durationMs - activity.thinking_ms - activity.generation_ms - activity.tool_ms,
+    );
+  }
+
+  function activityTotal(kind: ActivityKind): number {
+    if (!timing || timing.activity.length === 0) {
+      return timing?.activity_totals[`${kind}_ms`] ?? 0;
+    }
+    return timing.activity.reduce((total, activity) => {
+      const durationMs = activityDuration(activity);
+      return total + activityValue(activity, kind, durationMs);
+    }, 0);
   }
 
   function turnForCall(call: CallTiming): TurnTiming | undefined {
@@ -400,29 +430,31 @@
         {#each activityKinds as { kind, label } (kind)}
           <span>
             <span class="legend-dot" style="background: {activityToken(kind)};"></span>
-            {label} · {formatDuration(timing.activity_totals[`${kind}_ms`])}
+            {label} · {formatDuration(activityTotal(kind))}
           </span>
         {/each}
       </div>
       {#each timing.activity as activity, index (activity.message_id)}
+        {@const durationMs = activityDuration(activity)}
         <button
           type="button"
           class="agg-row activity-row"
           data-activity-ordinal={activity.ordinal}
-          aria-label={m.session_vitals_activity_turn({ ordinal: formatNumber(index + 1), duration: formatDuration(activity.duration_ms) })}
+          aria-label={m.session_vitals_activity_turn({ ordinal: formatNumber(index + 1), duration: formatDuration(durationMs) })}
           onclick={() => ui.scrollToOrdinal(activity.ordinal)}
         >
           <span class="agg-name">{formatNumber(index + 1)}</span>
           <span class="activity-track">
             {#each activityKinds as { kind, label } (kind)}
+              {@const valueMs = activityValue(activity, kind, durationMs)}
               <span
                 data-activity-kind={kind}
-                title={`${label} · ${formatDuration(activity[`${kind}_ms`])}`}
-                style="width: {(activity[`${kind}_ms`] / Math.max(activity.duration_ms, 1)) * 100}%; background: {activityToken(kind)};"
+                title={`${label} · ${formatDuration(valueMs)}`}
+                style="width: {(valueMs / Math.max(durationMs, 1)) * 100}%; background: {activityToken(kind)};"
               ></span>
             {/each}
           </span>
-          <span class="agg-val">{formatDuration(activity.duration_ms)}</span>
+          <span class="agg-val">{formatDuration(durationMs)}</span>
         </button>
       {/each}
     </section>

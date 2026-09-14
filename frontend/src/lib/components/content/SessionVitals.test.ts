@@ -49,6 +49,7 @@ vi.mock("../../api/timing.js", () => ({
 }));
 
 import { ui } from "../../stores/ui.svelte.js";
+import { liveTick } from "../../stores/liveTick.svelte.js";
 import { sessionTiming } from "../../stores/sessionTiming.svelte.js";
 import { m } from "../../i18n/index.js";
 // @ts-ignore
@@ -205,6 +206,59 @@ describe("SessionVitals", () => {
     );
     expect(document.querySelector(".activity-totals")?.textContent).toContain("Thinking · 0ms");
     expect(document.querySelector(".activity-totals")?.textContent).toContain("Generation · 0ms");
+  });
+
+  it("updates a running activity from live time", async () => {
+    const startMs = Date.now() - 1000;
+    mocks.fetchSessionTiming.mockResolvedValue({
+      ...mocks.timing,
+      total_duration_ms: 1000,
+      running: true,
+      activity_totals: { thinking_ms: 0, generation_ms: 0, tool_ms: 1000, unattributed_ms: 0 },
+      activity: [
+        {
+          message_id: 1,
+          ordinal: 0,
+          started_at: new Date(startMs).toISOString(),
+          duration_ms: 1000,
+          thinking_ms: 0,
+          generation_ms: 0,
+          tool_ms: 1000,
+          unattributed_ms: 0,
+          precision: "message_only",
+          running: true,
+        },
+      ],
+    });
+    component = mount(SessionVitals, {
+      target: document.body,
+      props: { sessionId: "sess-1", session: undefined },
+    });
+    await tick();
+    await tick();
+
+    liveTick.now = startMs + 5000;
+    await tick();
+
+    const row = document.querySelector<HTMLButtonElement>(".activity-row");
+    expect(row?.getAttribute("aria-label")).toBe("Turn 1 · 5.0s");
+    expect(
+      [...row!.querySelectorAll(".activity-track > span")].map((el) => el.getAttribute("title")),
+    ).toEqual([
+      "Thinking · 0ms",
+      "Generation · 0ms",
+      "Tool execution · 1.0s",
+      "Unattributed · 4.0s",
+    ]);
+    expect(row!.querySelector<HTMLElement>('[data-activity-kind="tool"]')!.style.width).toBe(
+      "20%",
+    );
+    expect(
+      row!.querySelector<HTMLElement>('[data-activity-kind="unattributed"]')!.style.width,
+    ).toBe("80%");
+    expect(document.querySelector(".activity-totals")?.textContent).toContain(
+      "Unattributed · 4.0s",
+    );
   });
 
   it("has an obvious close control inside the analysis pane", async () => {

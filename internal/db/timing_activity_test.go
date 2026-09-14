@@ -93,7 +93,7 @@ func TestActivityTiming_Intervals(t *testing.T) {
 		{name: "stale end", prompts: []TurnRow{prompt(0, 0)}, calls: []CallRow{paired}, ended: stamp(time.Second), tool: 2000, windows: []int64{4000}, tools: []int64{2000}, unknown: []int64{2000}},
 		{name: "no visible prompt", calls: []CallRow{paired}, ended: stamp(time.Second), tool: 2000},
 		{name: "split at prompt", prompts: []TurnRow{prompt(0, 0), prompt(2, 3*time.Second)}, calls: []CallRow{paired}, ended: stamp(6 * time.Second), tool: 2000, windows: []int64{3000, 3000}, tools: []int64{1000, 1000}, unknown: []int64{2000, 2000}},
-		{name: "clip before prompt", prompts: []TurnRow{prompt(0, 3*time.Second)}, calls: []CallRow{paired}, ended: stamp(6 * time.Second), tool: 1000, windows: []int64{3000}, tools: []int64{1000}, unknown: []int64{2000}},
+		{name: "clip before prompt", prompts: []TurnRow{prompt(0, 3*time.Second)}, calls: []CallRow{paired}, ended: stamp(6 * time.Second), tool: 2000, windows: []int64{3000}, tools: []int64{1000}, unknown: []int64{2000}},
 		{name: "same and cross category overlap", prompts: []TurnRow{prompt(0, 0)}, calls: []CallRow{paired, call("Bash", 3*time.Second, 5*time.Second), call("Read", 4*time.Second, 6*time.Second)}, ended: stamp(6 * time.Second), tool: 4000, windows: []int64{6000}, tools: []int64{4000}, unknown: []int64{2000}, categories: []CategoryTotal{{Category: "Bash", DurationMs: 3000, CallCount: 2}, {Category: "Read", DurationMs: 2000, CallCount: 1}}},
 		{name: "disjoint intervals", prompts: []TurnRow{prompt(0, 0)}, calls: []CallRow{call("Bash", time.Second, 2*time.Second), call("Bash", 4*time.Second, 5*time.Second)}, ended: stamp(6 * time.Second), tool: 2000, windows: []int64{6000}, tools: []int64{2000}, unknown: []int64{4000}},
 		{name: "running tail", prompts: []TurnRow{prompt(0, 0), prompt(2, 3*time.Second)}, calls: []CallRow{paired}, running: true, tool: 2000, windows: []int64{3000, 3000}, tools: []int64{1000, 1000}, unknown: []int64{2000, 2000}},
@@ -102,7 +102,7 @@ func TestActivityTiming_Intervals(t *testing.T) {
 		{name: "malformed execution", prompts: []TurnRow{prompt(0, 0)}, calls: []CallRow{{MessageID: 2, Category: "Bash", ExecutionStart: "invalid", ExecutionEnd: stamp(4 * time.Second)}}, ended: stamp(6 * time.Second), windows: []int64{6000}, tools: []int64{0}, unknown: []int64{6000}},
 		{name: "open execution", prompts: []TurnRow{prompt(0, 0)}, calls: []CallRow{{MessageID: 2, Category: "Task", ExecutionStart: stamp(2 * time.Second)}}, running: true, windows: []int64{6000}, tools: []int64{0}, unknown: []int64{6000}},
 		{name: "missing start", prompts: []TurnRow{prompt(0, 0)}, calls: []CallRow{{MessageID: 2, Category: "Bash", ExecutionEnd: stamp(4 * time.Second)}}, ended: stamp(6 * time.Second), windows: []int64{6000}, tools: []int64{0}, unknown: []int64{6000}},
-		{name: "backward prompt", prompts: []TurnRow{prompt(0, 3*time.Second), prompt(2, time.Second)}, calls: []CallRow{paired}, ended: stamp(6 * time.Second), tool: 1000, windows: []int64{3000}, tools: []int64{1000}, unknown: []int64{2000}},
+		{name: "backward prompt", prompts: []TurnRow{prompt(0, 3*time.Second), prompt(2, time.Second)}, calls: []CallRow{paired}, ended: stamp(6 * time.Second), tool: 2000, windows: []int64{3000}, tools: []int64{1000}, unknown: []int64{2000}},
 		{name: "fractional split conserves milliseconds", prompts: []TurnRow{prompt(0, 0), prompt(2, 1500*time.Microsecond)}, calls: []CallRow{call("Bash", 500*time.Microsecond, 2500*time.Microsecond)}, ended: stamp(3 * time.Millisecond), tool: 2, windows: []int64{1, 2}, tools: []int64{1, 1}, unknown: []int64{0, 1}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -140,7 +140,7 @@ func TestActivityTiming_Intervals(t *testing.T) {
 			}
 			if tc.name == "clip before prompt" {
 				require.NotNil(t, got.SlowestCall)
-				assert.Equal(t, int64(1000), *got.SlowestCall.DurationMs)
+				assert.Equal(t, int64(2000), *got.SlowestCall.DurationMs)
 			}
 			switch tc.name {
 			case "zero execution":
@@ -226,6 +226,29 @@ func TestActivityTiming_ClosedSubagentEvidence(t *testing.T) {
 	assert.Equal(t, ActivityTotals{ToolMs: 2000, UnattributedMs: 4000}, got.ActivityTotals)
 	assert.Equal(t, CategoryTotal{Category: "Task", DurationMs: 2000, CallCount: 1}, got.ByCategory[0])
 	assert.Equal(t, int64(2000), *got.SlowestCall.DurationMs)
+}
+
+func TestActivityTiming_PreservesEvidenceBeforeFirstPrompt(t *testing.T) {
+	start := "2026-04-26T10:00:00Z"
+	end := "2026-04-26T10:00:06Z"
+	got := AssembleTiming(
+		&Session{ID: "activity", StartedAt: &start, EndedAt: &end},
+		[]TurnRow{
+			{MessageID: 1, Ordinal: 0, Role: "user", ContentLength: 3, Timestamp: "2026-04-26T10:00:03Z"},
+			{MessageID: 2, Ordinal: 1, Role: "assistant", HasToolUse: true, ContentLength: 3, Timestamp: "2026-04-26T10:00:03Z"},
+		},
+		[]CallRow{{
+			MessageID: 2, Category: "Bash",
+			ExecutionStart: "2026-04-26T10:00:01Z", ExecutionEnd: "2026-04-26T10:00:02Z",
+		}},
+		time.Date(2026, 4, 26, 10, 0, 6, 0, time.UTC),
+	)
+	require.Len(t, got.Turns, 1)
+	require.NotNil(t, got.Turns[0].Calls[0].DurationMs)
+	assert.Equal(t, int64(1000), *got.Turns[0].Calls[0].DurationMs)
+	assert.Equal(t, int64(1000), got.ToolDurationMs)
+	assert.Equal(t, CategoryTotal{Category: "Bash", DurationMs: 1000, CallCount: 1}, got.ByCategory[0])
+	assert.Equal(t, int64(1000), *got.SlowestCall.DurationMs)
 }
 
 func TestActivityTiming_VisiblePrompts(t *testing.T) {

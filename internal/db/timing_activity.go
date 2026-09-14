@@ -107,6 +107,7 @@ func assembleTurnActivity(out *SessionTiming, sess *Session, turns []TurnRow, ca
 	}
 
 	var measured []activityInterval
+	var measuredTotals []activityInterval
 	byCategory := map[string][]activityInterval{}
 	counts := map[string]int{}
 	for i, call := range calls {
@@ -115,20 +116,21 @@ func assembleTurnActivity(out *SessionTiming, sess *Session, turns []TurnRow, ca
 		if interval == nil {
 			continue
 		}
+		measuredTotals = append(measuredTotals, *interval)
+		byCategory[call.Category] = append(byCategory[call.Category], *interval)
+		clipped := *interval
 		if hasLower {
-			interval.start = max(interval.start, lower)
+			clipped.start = max(clipped.start, lower)
 		}
 		if hasUpper {
-			interval.end = min(interval.end, upper)
+			clipped.end = min(clipped.end, upper)
 		}
-		if interval.end < interval.start {
-			intervals[i] = nil
+		if clipped.end < clipped.start {
 			continue
 		}
-		measured = append(measured, *interval)
-		byCategory[call.Category] = append(byCategory[call.Category], *interval)
+		measured = append(measured, clipped)
 	}
-	out.ToolDurationMs = activityUnionMs(measured)
+	out.ToolDurationMs = activityUnionMs(measuredTotals)
 	out.ActivityTotals.ToolMs = out.ToolDurationMs
 	for category, count := range counts {
 		out.ByCategory = append(out.ByCategory, CategoryTotal{

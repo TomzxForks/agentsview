@@ -367,12 +367,15 @@ test.describe("retained tool images", () => {
       }
       await route.abort();
     });
-    await page.route("**/api/v1/assets/first", (route) =>
-      route.fulfill({ body: assetBytes, contentType: "image/png" }),
-    );
-    await page.route("**/api/v1/assets/nested/second", (route) =>
-      route.fulfill({ body: assetBytes, contentType: "image/png" }),
-    );
+    await page.addInitScript(() => {
+      localStorage.setItem("agentsview-auth-token", "test-asset-token");
+    });
+    for (const assetPath of ["first", "nested%2Fsecond"]) {
+      await page.route(`**/api/v1/assets/${assetPath}`, async (route) => {
+        expect(route.request().headers()["authorization"]).toBe("Bearer test-asset-token");
+        await route.fulfill({ body: assetBytes, contentType: "image/png" });
+      });
+    }
 
     await page.setViewportSize({ width: 1280, height: 900 });
     await page.goto(`/sessions/${sessionId}`);
@@ -414,7 +417,7 @@ test.describe("retained tool images", () => {
     await retainedBlock.locator(".output-header").click();
     const retainedRaw = retainedBlock.locator(".output-content");
     await expect(retainedRaw).toBeVisible();
-    expect(await retainedRaw.textContent()).toBe(retainedResult.replace(/\r\n/g, "\n"));
+    expect(await retainedRaw.textContent()).toBe(retainedResult);
     const retainedMode = retainedBlock.getByRole("radiogroup", { name: "Output format" });
     await retainedMode.getByRole("radio", { name: "Formatted" }).click();
     const retainedFormatted = retainedBlock.locator(".formatted-output");
@@ -466,9 +469,8 @@ test.describe("retained tool images", () => {
     }
 
     await retainedMode.getByRole("radio", { name: "Raw" }).click();
-    await expect(retainedBlock.locator(".output-content")).toHaveText(
-      retainedResult.replace(/\r\n/g, "\n"),
-    );
+    await expect(retainedRaw).toBeVisible();
+    expect(await retainedRaw.textContent()).toBe(retainedResult);
     await expect(retainedBlock.locator(".output-content img")).toHaveCount(0);
 
     const imageOnly = await openFormatted(imageOnlyBlock);

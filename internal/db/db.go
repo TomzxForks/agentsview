@@ -487,7 +487,9 @@ CREATE INDEX IF NOT EXISTS idx_provider_freshness_updated_at
 // Subagent tool calls from Other to Task so delegation renders as a task call
 // and leaves the Other analytics bucket; subagent transcripts themselves are
 // new sources and need no re-parse.)
-const dataVersion = 107
+// (108: OpenCode v2 tool results retain embedded file payloads. Existing
+// sessions need re-parsing to recover files omitted from stored results.)
+const dataVersion = 108
 
 const tokenCoverageRepairStatsKey = "token_coverage_repair_v1"
 
@@ -763,6 +765,7 @@ type DB struct {
 	undrainedPools   []*sql.DB
 	readOnly         bool
 	toolResultImages config.ToolResultImages
+	assetsDir        string
 	// archiveContent indexes archiveContentRanks; see SetArchiveContent.
 	archiveContent atomic.Int32
 	// writerClosed is set while the writer pool is intentionally closed for a
@@ -1944,6 +1947,14 @@ func (db *DB) hasCursorUsageTable() bool {
 func CheckDataVersion(path string) error {
 	_, _, err := probeDatabase(path)
 	return err
+}
+
+// ArchiveNeedsResync probes an existing archive without modifying it. A
+// required schema repair or data reparse cannot be deferred to a live sync
+// worker, which is not allowed to replace the daemon's open archive.
+func ArchiveNeedsResync(path string) (bool, error) {
+	schemaStale, dataStale, err := probeDatabase(path)
+	return schemaStale || dataStale, err
 }
 
 // probeDatabase checks an existing database for schema and data staleness.

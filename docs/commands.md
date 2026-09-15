@@ -670,6 +670,21 @@ Report token usage and estimated cost aggregated by local-time day, scoped to
 the last 30 days by default. See [Token Usage & Costs](/docs/token-usage/) for a
 full write-up on reporting behavior and agent coverage.
 
+The report reads committed archive data. If it starts the daemon, session sync
+runs in the background; run `agentsview sync` first when new source changes must
+be included. An older archive that requires reparsing is upgraded before the
+daemon starts serving, with startup progress shown in the terminal. A cold usage
+cache prepares the sessions needed for the report without waiting for the full
+archive backfill. Slow reports print the current preparation phase and elapsed
+time to stderr, including with `--json`. Usage preparation is not subject to the
+server's normal write timeout. Press Ctrl+C to stop waiting; shared cache work
+can continue in the daemon.
+
+Restart older daemons after upgrading so they provide the usage progress
+endpoint. `session usage`, `token-use`, and `usage statusline` still wait for
+initial sync, including when they reuse a daemon started by daily usage.
+Statusline limits the complete wait and report request to 30 seconds.
+
 ```bash
 agentsview usage daily [flags]
 ```
@@ -683,8 +698,8 @@ agentsview usage daily [flags]
 | `--all`       | `false`       | Scan all history; overrides the default 30-day window                    |
 | `--agent`     |               | Filter by agent name                                                     |
 | `--breakdown` | `false`       | Show per-model rows and populate detailed JSON breakdown arrays          |
-| `--offline`   | `false`       | Skip the pricing catalog fetch; use embedded fallback                    |
-| `--no-sync`   | `false`       | Skip the on-demand sync pass before querying                             |
+| `--offline`   | `false`       | Read the archive directly without sync or pricing fetches                |
+| `--no-sync`   | `false`       | Skip source refresh; a new daemon starts without automatic sync          |
 | `--timezone`  | system        | IANA timezone name for date bucketing                                    |
 
 **Examples:**
@@ -708,13 +723,13 @@ status lines.
 agentsview usage statusline [flags]
 ```
 
-| Flag        | Default | Description                        |
-| ----------- | ------- | ---------------------------------- |
-| `--format`  | `human` | Output format: `human` or `json`   |
-| `--json`    | `false` | Alias for `--format json`          |
-| `--agent`   |         | Filter by agent name               |
-| `--offline` | `false` | Use embedded fallback pricing only |
-| `--no-sync` | `false` | Skip on-demand sync                |
+| Flag        | Default | Description                                      |
+| ----------- | ------- | ------------------------------------------------ |
+| `--format`  | `human` | Output format: `human` or `json`                 |
+| `--json`    | `false` | Alias for `--format json`                        |
+| `--agent`   |         | Filter by agent name                             |
+| `--offline` | `false` | Read the archive without sync or pricing fetches |
+| `--no-sync` | `false` | Skip source refresh                              |
 
 **Example:**
 
@@ -1638,3 +1653,7 @@ profile or pass them inline:
 ```bash
 AGENTSVIEW_DATA_DIR=/tmp/av-test agentsview serve
 ```
+
+### Ingest-time image offload
+
+Set `tool_result_images = "offload"` to offload supported tool-result images on future ingestion. Run `agentsview db migrate --images` to retry retained inline images after an asset-write failure. The raw `agentsview session export` command continues to stream provider source bytes. See [image storage](/docs/data/#ingest-time-image-offload) for backup and remote-backend limits.

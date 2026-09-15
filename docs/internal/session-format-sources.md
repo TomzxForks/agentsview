@@ -110,6 +110,17 @@ add an archived or maintained mirror without replacing the original identity.
 - **Format:** Project-scoped JSONL transcripts, including subagent JSONL, with
   `user`, `assistant`, `system`, and progress records.
 
+- **Title evidence (2026-09-13):** A local corpus measure sampled 768 files and
+  found 12,261 `ai-title` records, with a mean of 15.96 records per file and a
+  maximum of 454. No sampled `aiTitle` value was empty. `custom-title`
+  occurred in 7 files, and `sessionName` did not occur. Native Claude parsing
+  adopts non-empty `aiTitle` when no `/rename` is present; this target leaves
+  `custom-title` and `sessionName` to compatible producer parsing. A title
+  appended after the session is stored is persisted by one escalating full
+  parse while the stored name is still empty, and repeated records stay
+  incremental after that parse. A transcript that is no longer being written
+  is not re-read, so it re-titles on its next full parse.
+
 - **Evidence:** `no-public-source`.
 
 - **Upstream:** The public
@@ -885,6 +896,28 @@ add an archived or maintained mirror without replacing the original identity.
   `internal/parser/opencodereview_provider.go`.
 
 ## OpenCode (`opencode`)
+
+**Projection detail check (2026-09-12):** Rechecked the pinned
+[beta read tool](https://github.com/anomalyco/opencode/blob/d461154a8d2b24c4ad24a89b589069cf08ab168c/packages/core/src/tool/plugin/read.ts#L169),
+[tool content schema](https://github.com/anomalyco/opencode/blob/d461154a8d2b24c4ad24a89b589069cf08ab168c/packages/schema/src/tool.ts#L73),
+and
+[message updater](https://github.com/anomalyco/opencode/blob/d461154a8d2b24c4ad24a89b589069cf08ab168c/packages/core/src/session/message-updater.ts#L322).
+The read tool puts image and PDF bytes in base64 data URIs, alongside their MIME
+type and filename. Tool success copies that content into the projection; tool
+errors may also retain content. Agentsview stores file-bearing results as
+ordered JSON blocks. Inline images use `input_image`/`image_url` so the existing
+image keep/drop policy owns their only payload copy. PDFs and other files keep
+their `file` records, including the full URI, MIME type, and optional name, in
+raw result JSON. Remote and filesystem URIs remain references and are not
+fetched. Text-only results retain their existing plain-text format.
+
+`testdata/opencode_v2/tool_files.json` is a synthetic fixture shaped from these
+producer sources, with a valid one-pixel PNG and a one-page PDF; it is not a
+captured CLI conversation. Parser tests cover successful and failed results.
+Normal sync tests use the captured beta database schema and check archived
+payloads, image keep/drop behavior, unchanged PDF/text files and references, and
+an unchanged second sync. Data version 108 makes existing imports eligible to
+recover omitted file payloads. This adds retention, not a PDF previewer.
 
 **V2 projection check (2026-09-08):** Cloned upstream at
 `dff8fbc149fb7492e4f07b713ac31ea70d9a541c` and checked the
@@ -2048,7 +2081,11 @@ preservation of archived messages for OpenCode, Kilo, MiMoCode, and Icodemate.
 
 - **Agentsview:** `internal/parser/kiro.go`, `internal/parser/kiro_sqlite.go`,
   and `internal/parser/kiro_provider.go`; both generations must remain
-  discoverable.
+  discoverable. SQLite project attribution uses `conversations_v2.key`, with
+  recorded environment metadata as the fallback when the key is empty. Bulk
+  and single-session parsing honor the caller's filesystem-discovery policy;
+  `TestKiroProviderSQLiteProjectDiscoveryPolicy` verifies project names and
+  filesystem probes with discovery enabled and disabled.
 
 ## Kiro IDE (`kiro-ide`)
 
